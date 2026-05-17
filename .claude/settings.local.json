@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__unityMCP__manage_scene",
+      "mcp__unityMCP__manage_components",
+      "mcp__unityMCP__manage_gameobject",
+      "mcp__unityMCP__read_console",
+      "mcp__unityMCP__manage_camera",
+      "mcp__unityMCP__find_gameobjects",
+      "mcp__unityMCP__refresh_unity"
+    ]
+  }
+}

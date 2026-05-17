@@ -1,0 +1,38 @@
+{
+  "id": "sample_01",
+  "title": "Sample Song",
+  "artist": "TactileRhythm",
+  "bpm": 120.0,
+  "audioFile": "Audio/sample",
+  "offset": 0.0,
+  "notes": [
+    { "time": 1.00, "lane": 0, "type": "tap", "duration": 0 },
+    { "time": 1.50, "lane": 2, "type": "tap", "duration": 0 },
+    { "time": 2.00, "lane": 1, "type": "tap", "duration": 0 },
+    { "time": 2.50, "lane": 3, "type": "tap", "duration": 0 },
+
+    { "time": 3.00, "lane": 0, "type": "tap", "duration": 0 },
+    { "time": 3.00, "lane": 3, "type": "tap", "duration": 0 },
+    { "time": 3.50, "lane": 1, "type": "tap", "duration": 0 },
+    { "time": 3.50, "lane": 2, "type": "tap", "duration": 0 },
+
+    { "time": 4.00, "lane": 0, "type": "tap", "duration": 0 },
+    { "time": 4.25, "lane": 1, "type": "tap", "duration": 0 },
+    { "time": 4.50, "lane": 2, "type": "tap", "duration": 0 },
+    { "time": 4.75, "lane": 3, "type": "tap", "duration": 0 },
+
+    { "time": 5.00, "lane": 3, "type": "tap", "duration": 0 },
+    { "time": 5.25, "lane": 2, "type": "tap", "duration": 0 },
+    { "time": 5.50, "lane": 1, "type": "tap", "duration": 0 },
+    { "time": 5.75, "lane": 0, "type": "tap", "duration": 0 },
+
+    { "time": 6.00, "lane": 0, "type": "tap", "duration": 0 },
+    { "time": 6.00, "lane": 2, "type": "tap", "duration": 0 },
+    { "time": 6.50, "lane": 1, "type": "tap", "duration": 0 },
+    { "time": 6.50, "lane": 3, "type": "tap", "duration": 0 },
+    { "time": 7.00, "lane": 0, "type": "tap", "duration": 0 },
+    { "time": 7.00, "lane": 1, "type": "tap", "duration": 0 },
+    { "time": 7.00, "lane": 2, "type": "tap", "duration": 0 },
+    { "time": 7.00, "lane": 3, "type": "tap", "duration": 0 }
+  ]
+}
