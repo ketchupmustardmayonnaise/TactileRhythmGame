@@ -26,15 +26,17 @@ public class DotMatrixDisplay : MonoBehaviour
     public float spacingFactor = 2.8f;
 
     [Header("Colors")]
-    public Color activeColor   = new Color(0.95f, 0.95f, 0.95f);
-    public Color inactiveColor = new Color(0.12f, 0.12f, 0.14f);
+    public Color activeColor     = new Color(0.95f, 0.95f, 0.95f);
+    public Color inactiveColor   = new Color(0.12f, 0.12f, 0.14f);
     public Color backgroundColor = new Color(0.05f, 0.05f, 0.07f);
+    public Color highlightColor  = new Color(0.2f,  0.5f,  1.0f);
 
     // 공개 접근자 — GameEngine이 읽기
     public int Columns => columns;
     public int Rows => rows;
 
     private bool[,] dotState;
+    private bool[,] dotHighlight;
     private Texture2D tex;
     private Color32[] pixels;
     private RawImage rawImage;
@@ -71,7 +73,8 @@ public class DotMatrixDisplay : MonoBehaviour
         tex.filterMode = FilterMode.Bilinear;
         pixels = new Color32[texW * texH];
 
-        dotState         = new bool[rows, columns];
+        dotState      = new bool[rows, columns];
+        dotHighlight  = new bool[rows, columns];
         rawImage.texture = tex;
 
         ClearAll();
@@ -84,13 +87,22 @@ public class DotMatrixDisplay : MonoBehaviour
             dotState[row, col] = active;
     }
 
+    public void SetDotHighlight(int row, int col, bool highlighted)
+    {
+        if ((uint)row < (uint)rows && (uint)col < (uint)columns)
+            dotHighlight[row, col] = highlighted;
+    }
+
     public bool GetDot(int row, int col) => dotState[row, col];
 
     public void ClearAll()
     {
         for (int r = 0; r < rows; r++)
             for (int c = 0; c < columns; c++)
-                dotState[r, c] = false;
+            {
+                dotState[r, c]     = false;
+                dotHighlight[r, c] = false;
+            }
     }
 
     /// <summary>
@@ -114,7 +126,7 @@ public class DotMatrixDisplay : MonoBehaviour
                 float cy = dotRadius + (rows - 1 - row) * spacing; // Y 반전
 
                 Color32 dotC = dotState[row, col]
-                    ? (Color32)activeColor
+                    ? (dotHighlight[row, col] ? (Color32)highlightColor : (Color32)activeColor)
                     : (Color32)inactiveColor;
 
                 int xMin = Mathf.Max(0, (int)(cx - r));

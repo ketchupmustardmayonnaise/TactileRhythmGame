@@ -8,7 +8,7 @@ using UnityEngine;
 public class GameEngine : MonoBehaviour
 {
     [Header("References")]
-    public DotMatrixDisplay display;
+    public BrailleCellDisplay display;
     public AudioManager audioManager;
 
     [Header("Game Settings")]
@@ -81,7 +81,11 @@ public class GameEngine : MonoBehaviour
             if (diff < bestDiff) { bestDiff = diff; best = n; }
         }
 
-        if (best == null) return HitResult.None;
+        if (best == null)
+        {
+            laneFlash[lane] = 0.12f;
+            return HitResult.None;
+        }
 
         if (bestDiff <= windowPerfect)
         {
@@ -93,6 +97,7 @@ public class GameEngine : MonoBehaviour
             RegisterHit(best, lane, 100);
             return HitResult.Good;
         }
+        laneFlash[lane] = 0.12f;
         return HitResult.None;
     }
 
@@ -176,7 +181,7 @@ public class GameEngine : MonoBehaviour
         for (int c = 0; c < TotalCols; c++)
             display.SetDot(HitRow, c, true);
 
-        // 히트 플래시
+        // 히트 플래시 (파란색 하이라이트)
         for (int lane = 0; lane < laneCount; lane++)
         {
             if (laneFlash[lane] > 0f)
@@ -185,7 +190,10 @@ public class GameEngine : MonoBehaviour
                 int start = lane * colsPerLane + 1;
                 int end   = start + colsPerLane - 2;
                 for (int c = start; c <= end; c++)
+                {
                     display.SetDot(HitRow + 1, c, true);
+                    display.SetDotHighlight(HitRow + 1, c, true);
+                }
             }
         }
 
