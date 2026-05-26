@@ -48,6 +48,33 @@ public class BrailleCircleButton
             }
     }
 
+    /// <summary>
+    /// 테두리는 항상 active(1), 내부만 interiorT(0~1)로 채운다.
+    /// 노트 접근 시 내부가 서서히 밝아지는 효과용.
+    /// </summary>
+    public void DrawFill(BrailleCellDisplay display, float interiorT)
+    {
+        ComputeGeometry(display, out float cr, out float cc,
+                        out float radius, out float thickness, out float ax, out float colR);
+        ComputeBounds(display, cr, cc, radius, colR,
+                      out int rMin, out int rMax, out int cMin, out int cMax);
+
+        float innerEdge = radius - thickness;   // 테두리 안쪽 경계
+
+        for (int r = rMin; r <= rMax; r++)
+            for (int c = cMin; c <= cMax; c++)
+            {
+                float dr   = r - cr;
+                float dc   = (c - cc) * ax;
+                float dist = Mathf.Sqrt(dr * dr + dc * dc);
+
+                if (Mathf.Abs(dist - radius) <= thickness)
+                    display.SetDotActivation(r, c, 1f);        // 테두리: 항상 밝게
+                else if (dist < innerEdge)
+                    display.SetDotActivation(r, c, interiorT); // 내부: 0→1 점진
+            }
+    }
+
     /// <summary>셀(row, col)이 이 버튼의 원 내부에 있는지 (터치 판정용).</summary>
     public bool Contains(int row, int col, BrailleCellDisplay display)
     {

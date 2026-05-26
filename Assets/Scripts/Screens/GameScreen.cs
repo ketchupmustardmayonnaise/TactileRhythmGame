@@ -4,17 +4,13 @@ using TMPro;
 
 /// <summary>
 /// 게임 씬을 총괄한다.
-/// - 씬에 GameEngine, AudioManager, DotMatrixDisplay가 있어야 한다.
-/// - laneButtons 배열에 레인 수만큼 Button을 할당한다.
-/// - 에디터 테스트: D/F/J/K 키로 레인 0~3 탭
+/// - 씬에 GameEngine, AudioManager, BrailleCellDisplay가 있어야 한다.
+/// - 에디터 테스트: S/D/F 키 → 왼쪽 Lane 1-3, J/K/L 키 → 오른쪽 Lane 4-6
 /// </summary>
 public class GameScreen : MonoBehaviour
 {
     [Header("Core")]
     public GameEngine engine;
-
-    [Header("Lane Input Buttons (UI)")]
-    public Button[] laneButtons;
 
     [Header("HUD (선택)")]
     public TextMeshProUGUI scoreText;
@@ -22,43 +18,50 @@ public class GameScreen : MonoBehaviour
     public TextMeshProUGUI judgmentText;
 
     [Tooltip("Resources/Songs/ 안의 JSON 파일명 (확장자 제외)")]
-    public string songResourceName = "sample";
+    public string songResourceName = "heavy_serenade";
+
+    [Tooltip("카운트다운(초). 0이면 즉시 시작")]
+    public float countdownSeconds = 3f;
 
     private float judgmentTimer;
-    private static readonly KeyCode[] DebugKeys = { KeyCode.D, KeyCode.F, KeyCode.J, KeyCode.K };
+
+    // 6키: 왼손 S/D/F = Lane 1-3, 오른손 J/K/L = Lane 4-6
+    private static readonly KeyCode[] DebugKeys =
+    {
+        KeyCode.S, KeyCode.D, KeyCode.F,   // 왼쪽 1-3
+        KeyCode.J, KeyCode.K, KeyCode.L    // 오른쪽 4-6
+    };
 
     void Start()
     {
         SongData song = SongLoader.LoadFromResources(songResourceName);
         if (song == null) return;
 
-        engine.LoadSong(song);
-
-        for (int i = 0; i < laneButtons.Length; i++)
+        if (string.IsNullOrEmpty(song.source))
         {
-            int lane = i;
-            laneButtons[i].onClick.AddListener(() => HandleTap(lane));
+            Debug.LogError($"[GameScreen] '{songResourceName}.json'에 source 필드가 없습니다. " +
+                           "인스펙터의 Song Resource Name을 확인하세요. (예: heavy_serenade)");
+            return;
         }
 
-        // engine.StartGame(countdownSeconds: 3f);  // 아이들 화면 확인용 주석 처리
+        engine.LoadSong(song);
+        engine.StartGame(countdownSeconds);
     }
 
     void Update()
     {
         // HUD 갱신
-        if (scoreText)   scoreText.text   = $"SCORE\n{engine.Score:D7}";
-        if (comboText)   comboText.text   = engine.Combo > 1 ? $"{engine.Combo} COMBO" : "";
+        if (scoreText) scoreText.text = $"SCORE\n{engine.Score:D7}";
+        if (comboText) comboText.text = engine.Combo > 1 ? $"{engine.Combo} COMBO" : "";
         if (judgmentText && judgmentTimer > 0f)
         {
             judgmentTimer -= Time.deltaTime;
             if (judgmentTimer <= 0f) judgmentText.text = "";
         }
 
-        // 에디터 키보드 테스트
-#if UNITY_EDITOR
-        for (int i = 0; i < Mathf.Min(DebugKeys.Length, laneButtons.Length); i++)
+        // 키보드 입력 (에디터 + 빌드 공통)
+        for (int i = 0; i < Mathf.Min(DebugKeys.Length, engine.LaneCount); i++)
             if (Input.GetKeyDown(DebugKeys[i])) HandleTap(i);
-#endif
     }
 
     void HandleTap(int lane)

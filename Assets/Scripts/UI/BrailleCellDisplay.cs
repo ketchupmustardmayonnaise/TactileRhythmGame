@@ -31,7 +31,6 @@ public class BrailleCellDisplay : MonoBehaviour
     // GameEngine 호환 프로퍼티
     public int Rows    => dotRows;
     public int Columns => dotColumns;
-    public int columns => dotColumns;
 
     /// <summary>GameEngine이 설정. 터치 시 버튼 단위 하이라이트에 사용.</summary>
     [HideInInspector] public BrailleCircleButton[] buttons;
@@ -131,8 +130,6 @@ public class BrailleCellDisplay : MonoBehaviour
         if (cells == null || !InBounds(row, col)) return;
         cells[row, col].SetHighlight(highlighted);
     }
-
-    public bool GetDot(int row, int col) => false;
 
     public void ClearAll()
     {
