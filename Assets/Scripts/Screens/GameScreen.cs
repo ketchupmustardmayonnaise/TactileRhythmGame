@@ -40,7 +40,7 @@ public class GameScreen : MonoBehaviour
             laneButtons[i].onClick.AddListener(() => HandleTap(lane));
         }
 
-        engine.StartGame(countdownSeconds: 3f);
+        // engine.StartGame(countdownSeconds: 3f);  // 아이들 화면 확인용 주석 처리
     }
 
     void Update()

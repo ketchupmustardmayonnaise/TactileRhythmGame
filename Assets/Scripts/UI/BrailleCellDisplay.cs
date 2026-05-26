@@ -1,28 +1,22 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// BrailleCell 오브젝트 그리드로 구성된 점자 디스플레이.
-/// DotMatrixDisplay와 동일한 public API를 유지하므로 GameEngine 수정 최소화.
-///
-/// 그리드 대응:
-///   셀 20열 × 4행 = 80 BrailleCell
-///   각 셀 2열 × 4행 = 8점
-///   총 40열 × 16행 = 640점 (DotMatrixDisplay와 동일)
+/// BrailleCell(점 하나)을 dotRows × dotColumns 그리드로 배치하는 점자 디스플레이.
+/// Start() 다음 프레임에 RectTransform 실제 크기를 읽어 점 간격과 지름을 자동 계산하므로
+/// 해상도/화면 크기에 무관하게 항상 화면을 꽉 채운다.
 /// </summary>
 [RequireComponent(typeof(Image))]
 public class BrailleCellDisplay : MonoBehaviour
 {
-    [Header("Grid (셀 단위)")]
-    public int cellColumns = 20;
-    public int cellRows    = 4;
+    [Header("Grid (dot 단위)")]
+    public int dotColumns = 40;
+    public int dotRows    = 16;
 
-    [Header("Dot/Cell 크기")]
-    public float dotDiameter = 12f;
-    public float dotSpacingX = 18f;
-    public float dotSpacingY = 18f;
-    public float cellGapX    = 6f;
-    public float cellGapY    = 6f;
+    [Header("Dot 크기 비율 (0~1)")]
+    [Range(0.3f, 0.95f)]
+    public float dotFillRatio = 0.7f;
 
     [Header("Colors")]
     public Color activeColor     = new Color(0.95f, 0.95f, 0.95f);
@@ -30,14 +24,21 @@ public class BrailleCellDisplay : MonoBehaviour
     public Color backgroundColor = new Color(0.05f, 0.05f, 0.07f);
     public Color highlightColor  = new Color(0.2f,  0.5f,  1.0f);
 
-    // DotMatrixDisplay 호환 프로퍼티
-    public int Rows    => cellRows    * BrailleCell.DotRows;   // 16
-    public int Columns => cellColumns * BrailleCell.DotCols;   // 40
-    public int columns => Columns;
+    // GameEngine 호환 프로퍼티
+    public int Rows    => dotRows;
+    public int Columns => dotColumns;
+    public int columns => dotColumns;
 
     private BrailleCell[,] cells;
+    private Canvas          _canvas;
 
-    void Awake() => Build();
+    void Awake() => _canvas = GetComponentInParent<Canvas>();
+
+    System.Collections.IEnumerator Start()
+    {
+        yield return null; // 레이아웃 확정 대기 (Canvas가 실제 크기를 계산한 뒤 실행)
+        Build();
+    }
 
     public void Build()
     {
@@ -48,50 +49,61 @@ public class BrailleCellDisplay : MonoBehaviour
             else DestroyImmediate(child);
         }
 
-        cells = new BrailleCell[cellRows, cellColumns];
+        cells = new BrailleCell[dotRows, dotColumns];
 
         var bg = GetComponent<Image>();
         if (bg != null) bg.color = backgroundColor;
 
-        float cellW = BrailleCell.DotCols * dotSpacingX + cellGapX;
-        float cellH = BrailleCell.DotRows * dotSpacingY + cellGapY;
+        var rect       = GetComponent<RectTransform>().rect;
+        float spacingX = rect.width  / dotColumns;
+        float spacingY = rect.height / dotRows;
+        float diameter = Mathf.Min(spacingX, spacingY) * dotFillRatio;
 
-        for (int cr = 0; cr < cellRows; cr++)
+        for (int r = 0; r < dotRows; r++)
         {
-            for (int cc = 0; cc < cellColumns; cc++)
+            for (int c = 0; c < dotColumns; c++)
             {
-                var go = new GameObject($"Cell_{cr}_{cc}", typeof(RectTransform));
+                var go = new GameObject($"Cell_{r}_{c}", typeof(RectTransform), typeof(Image));
                 go.transform.SetParent(transform, false);
 
                 var rt = go.GetComponent<RectTransform>();
                 rt.anchorMin        = rt.anchorMax = new Vector2(0f, 1f);
-                rt.pivot            = new Vector2(0f, 1f);
-                rt.anchoredPosition = new Vector2(cc * cellW, -cr * cellH);
-                rt.sizeDelta        = new Vector2(cellW, cellH);
+                rt.pivot            = new Vector2(0.5f, 0.5f);
+                rt.anchoredPosition = new Vector2(
+                    (c + 0.5f) * spacingX,
+                    -(r + 0.5f) * spacingY
+                );
+                rt.sizeDelta = Vector2.one * diameter;
 
                 var cell = go.AddComponent<BrailleCell>();
                 cell.activeColor    = activeColor;
                 cell.inactiveColor  = inactiveColor;
                 cell.highlightColor = highlightColor;
-                cell.Init(dotDiameter, dotSpacingX, dotSpacingY);
+                cell.Init(diameter);
 
-                cells[cr, cc] = cell;
+                cells[r, c] = cell;
             }
         }
     }
 
-    // --- DotMatrixDisplay 호환 API ---
+    // 0~1 연속값으로 activation 설정
+    public void SetDotActivation(int row, int col, float t)
+    {
+        if (cells == null || !InBounds(row, col)) return;
+        cells[row, col].SetActivation(t);
+    }
 
+    // 편의 메서드: bool → SetActivation
     public void SetDot(int row, int col, bool active)
     {
-        if (!Resolve(row, col, out var cell, out int di)) return;
-        cell.SetDot(di, active);
+        if (cells == null || !InBounds(row, col)) return;
+        cells[row, col].SetActive(active);
     }
 
     public void SetDotHighlight(int row, int col, bool highlighted)
     {
-        if (!Resolve(row, col, out var cell, out int di)) return;
-        cell.SetDotHighlight(di, highlighted);
+        if (cells == null || !InBounds(row, col)) return;
+        cells[row, col].SetHighlight(highlighted);
     }
 
     public bool GetDot(int row, int col) => false;
@@ -99,28 +111,59 @@ public class BrailleCellDisplay : MonoBehaviour
     public void ClearAll()
     {
         if (cells == null) return;
-        for (int cr = 0; cr < cellRows; cr++)
-            for (int cc = 0; cc < cellColumns; cc++)
-                cells[cr, cc]?.ClearAll();
+        for (int r = 0; r < dotRows; r++)
+            for (int c = 0; c < dotColumns; c++)
+                cells[r, c]?.Clear();
     }
 
     public void Refresh() { }
 
-    // --- 내부 ---
+    bool InBounds(int row, int col) =>
+        (uint)row < (uint)dotRows && (uint)col < (uint)dotColumns;
 
-    bool Resolve(int row, int col, out BrailleCell cell, out int dotIdx)
+    // --- 터치 하이라이트 ---
+
+    void LateUpdate()
     {
-        int cr = row / BrailleCell.DotRows;
-        int cc = col / BrailleCell.DotCols;
-        int dr = row % BrailleCell.DotRows;
-        int dc = col % BrailleCell.DotCols;
+        if (cells == null) return;
 
-        cell   = null;
-        dotIdx = 0;
+        Camera uiCam = _canvas != null ? _canvas.worldCamera : null;
 
-        if ((uint)cr >= (uint)cellRows || (uint)cc >= (uint)cellColumns) return false;
-        cell   = cells[cr, cc];
-        dotIdx = dr * BrailleCell.DotCols + dc;
-        return cell != null;
+        // 모바일 멀티터치
+        for (int i = 0; i < Input.touchCount; i++)
+        {
+            Touch touch = Input.GetTouch(i);
+            if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                continue;
+            if (TryGetCellAt(touch.position, uiCam, out int r, out int c))
+                cells[r, c].SetHighlight(true);
+        }
+
+        // PC / 에디터 마우스 (좌클릭)
+        if (Input.GetMouseButton(0))
+        {
+            if (TryGetCellAt(Input.mousePosition, uiCam, out int r, out int c))
+                cells[r, c].SetHighlight(true);
+        }
+    }
+
+    bool TryGetCellAt(Vector2 screenPos, Camera uiCam, out int row, out int col)
+    {
+        row = col = 0;
+        var rt = GetComponent<RectTransform>();
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rt, screenPos, uiCam, out Vector2 local))
+            return false;
+
+        Rect rect  = rt.rect;
+        float normX = (local.x - rect.xMin) / rect.width;
+        float normY = (local.y - rect.yMin) / rect.height; // 0=아래, 1=위
+
+        if (normX < 0f || normX >= 1f || normY < 0f || normY >= 1f)
+            return false;
+
+        col = Mathf.FloorToInt(normX * dotColumns);
+        row = Mathf.FloorToInt((1f - normY) * dotRows); // row 0 = 맨 위
+        return true;
     }
 }

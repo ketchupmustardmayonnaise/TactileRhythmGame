@@ -105,7 +105,11 @@ public class GameEngine : MonoBehaviour
 
     void Update()
     {
-        if (!IsRunning || song == null) return;
+        if (!IsRunning || song == null)
+        {
+            RenderIdleScreen();
+            return;
+        }
 
         float now = (float)audioManager.SongTime;
 
@@ -161,6 +165,72 @@ public class GameEngine : MonoBehaviour
                 activeNotes.RemoveAt(i);
             }
         }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // 아이들 화면: 6개 원형 버튼 테두리만 표시
+    // ──────────────────────────────────────────────────────────
+
+    void RenderIdleScreen()
+    {
+        display.ClearAll();
+
+        float ax = DotAspect();   // dotW / dotH (열 폭 ÷ 행 높이)
+
+        const float CR = 1.3f;   // 원 반지름 (행 높이 단위)
+        const float TH = 0.6f;   // 테두리 두께 (행 높이 단위)
+
+        // 위쪽 4개 버튼 (row=4.5):
+        //   왼쪽 2개 col=5, col=15 / 오른쪽 2개 col=25, col=35
+        DrawCircleOutline(4.5f,  5f, CR, ax, TH);
+        DrawCircleOutline(4.5f, 15f, CR, ax, TH);
+        DrawCircleOutline(4.5f, 25f, CR, ax, TH);
+        DrawCircleOutline(4.5f, 35f, CR, ax, TH);
+
+        // 아래쪽 2개 버튼 (row=11):
+        //   왼쪽 중앙 col=10 / 오른쪽 중앙 col=30
+        DrawCircleOutline(11f, 10f, CR, ax, TH);
+        DrawCircleOutline(11f, 30f, CR, ax, TH);
+
+        display.Refresh();
+    }
+
+    /// <returns>dotW / dotH — 열 1칸이 행 1칸보다 화면에서 얼마나 좁은지 비율</returns>
+    float DotAspect()
+    {
+        if (display == null) return 1f;
+        var rect = display.GetComponent<RectTransform>().rect;
+        if (rect.width <= 0 || rect.height <= 0) return 1f;
+        return (rect.width / TotalCols) / (rect.height / TotalRows);
+    }
+
+    /// <summary>
+    /// 시각적으로 원형이 되도록 aspect 보정하여 dot matrix에 원 테두리를 그린다.
+    /// </summary>
+    /// <param name="cr">중심 행</param>
+    /// <param name="cc">중심 열</param>
+    /// <param name="radius">반지름 (행 높이 기준)</param>
+    /// <param name="aspectX">DotAspect() 값</param>
+    /// <param name="thickness">테두리 두께 (행 높이 기준, 기본 0.6)</param>
+    void DrawCircleOutline(float cr, float cc, float radius,
+                           float aspectX, float thickness = 0.6f)
+    {
+        float colR = radius / aspectX;   // 열 단위 반지름
+
+        int rMin = Mathf.Max(0,            Mathf.FloorToInt(cr - radius - 1));
+        int rMax = Mathf.Min(TotalRows - 1, Mathf.CeilToInt(cr + radius + 1));
+        int cMin = Mathf.Max(0,            Mathf.FloorToInt(cc - colR   - 1));
+        int cMax = Mathf.Min(TotalCols - 1, Mathf.CeilToInt(cc + colR   + 1));
+
+        for (int r = rMin; r <= rMax; r++)
+            for (int c = cMin; c <= cMax; c++)
+            {
+                float dr   = r - cr;
+                float dc   = (c - cc) * aspectX;   // 열 차이 → 행 높이 단위로 환산
+                float dist = Mathf.Sqrt(dr * dr + dc * dc);
+                if (Mathf.Abs(dist - radius) <= thickness)
+                    display.SetDot(r, c, true);
+            }
     }
 
     void RenderFrame(float now)

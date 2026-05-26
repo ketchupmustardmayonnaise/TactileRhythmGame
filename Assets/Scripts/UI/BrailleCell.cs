@@ -2,96 +2,71 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// 8점 점자 셀 하나 (2열 × 4행).
-/// BrailleCellDisplay가 그리드 형태로 인스턴스화한다.
+/// 점자 디스플레이의 점 하나.
 ///
-/// 도트 인덱스 레이아웃:
-///   0  1
-///   2  3
-///   4  5
-///   6  7
+/// 상태:
+///   activation (float 0~1) : 0 = inactive(점 내려감), 1 = active(점 완전히 올라감). 연속값.
+///   highlighted (bool)     : 터치됨 → highlightColor 고정 표시.
+///
+/// BrailleCellDisplay가 rows × columns 그리드로 배치한다.
 /// </summary>
-[RequireComponent(typeof(RectTransform))]
+[RequireComponent(typeof(RectTransform), typeof(Image))]
 public class BrailleCell : MonoBehaviour
 {
-    public const int DotCols     = 2;
-    public const int DotRows     = 4;
-    public const int DotsPerCell = DotCols * DotRows;  // 8
-
     [HideInInspector] public Color activeColor    = new Color(0.95f, 0.95f, 0.95f);
     [HideInInspector] public Color inactiveColor  = new Color(0.12f, 0.12f, 0.14f);
     [HideInInspector] public Color highlightColor = new Color(0.2f,  0.5f,  1.0f);
 
-    private Image[] dotImages;
-    private bool[]  dotState;
-    private bool[]  dotHighlight;
+    private Image _image;
+    private float _activation;   // 0 = inactive, 1 = active
+    private bool  _highlighted;
 
     private static Sprite sharedCircleSprite;
 
-    public void Init(float dotDiameter, float spacingX, float spacingY)
+    public void Init(float diameter)
     {
-        dotImages    = new Image[DotsPerCell];
-        dotState     = new bool[DotsPerCell];
-        dotHighlight = new bool[DotsPerCell];
+        _image = GetComponent<Image>();
 
         if (sharedCircleSprite == null)
             sharedCircleSprite = BuildCircleSprite(32);
 
-        for (int i = 0; i < DotsPerCell; i++)
-        {
-            int dr = i / DotCols;
-            int dc = i % DotCols;
+        _image.sprite        = sharedCircleSprite;
+        _image.raycastTarget = false;
 
-            var go = new GameObject($"Dot{i}", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(transform, false);
+        GetComponent<RectTransform>().sizeDelta = Vector2.one * diameter;
 
-            var rt = go.GetComponent<RectTransform>();
-            rt.anchorMin        = rt.anchorMax = new Vector2(0f, 1f);
-            rt.pivot            = new Vector2(0.5f, 0.5f);
-            rt.sizeDelta        = Vector2.one * dotDiameter;
-            rt.anchoredPosition = new Vector2(
-                dc * spacingX + spacingX * 0.5f,
-                -(dr * spacingY + spacingY * 0.5f)
-            );
-
-            var img = go.GetComponent<Image>();
-            img.sprite        = sharedCircleSprite;
-            img.raycastTarget = false;
-            dotImages[i]      = img;
-            ApplyColor(i);
-        }
+        ApplyColor();
     }
 
-    public void SetDot(int idx, bool active)
+    // 0 = inactive, 1 = active (연속값)
+    public void SetActivation(float t)
     {
-        if ((uint)idx >= DotsPerCell) return;
-        dotState[idx] = active;
-        ApplyColor(idx);
+        _activation = Mathf.Clamp01(t);
+        ApplyColor();
     }
 
-    public void SetDotHighlight(int idx, bool highlighted)
+    // 편의 메서드: bool → SetActivation
+    public void SetActive(bool active) => SetActivation(active ? 1f : 0f);
+
+    public void SetHighlight(bool highlighted)
     {
-        if ((uint)idx >= DotsPerCell) return;
-        dotHighlight[idx] = highlighted;
-        ApplyColor(idx);
+        _highlighted = highlighted;
+        ApplyColor();
     }
 
-    public void ClearAll()
+    public void Clear()
     {
-        for (int i = 0; i < DotsPerCell; i++)
-        {
-            dotState[i]     = false;
-            dotHighlight[i] = false;
-            ApplyColor(i);
-        }
+        _activation  = 0f;
+        _highlighted = false;
+        ApplyColor();
     }
 
-    void ApplyColor(int i)
+    void ApplyColor()
     {
-        if (dotImages == null || dotImages[i] == null) return;
-        dotImages[i].color = dotState[i]
-            ? (dotHighlight[i] ? highlightColor : activeColor)
-            : inactiveColor;
+        if (_image == null) return;
+        _image.color = _highlighted
+            ? highlightColor
+            : Color.Lerp(inactiveColor, activeColor, _activation);
     }
 
     static Sprite BuildCircleSprite(int size)
@@ -103,14 +78,12 @@ public class BrailleCell : MonoBehaviour
         float r = size * 0.5f - 0.5f;
 
         for (int y = 0; y < size; y++)
-        {
             for (int x = 0; x < size; x++)
             {
                 float d = Mathf.Sqrt((x - c) * (x - c) + (y - c) * (y - c));
                 byte  a = (byte)(Mathf.Clamp01(r - d + 1f) * 255);
                 px[y * size + x] = new Color32(255, 255, 255, a);
             }
-        }
 
         tex.SetPixels32(px);
         tex.Apply();
