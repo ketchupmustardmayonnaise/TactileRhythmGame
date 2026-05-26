@@ -69,6 +69,8 @@ public class BrailleCell : MonoBehaviour
             : Color.Lerp(inactiveColor, activeColor, _activation);
     }
 
+
+    // 점자 셀 하나를 그림
     static Sprite BuildCircleSprite(int size)
     {
         var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);

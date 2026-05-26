@@ -1,12 +1,16 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 /// <summary>
 /// BrailleCell(점 하나)을 dotRows × dotColumns 그리드로 배치하는 점자 디스플레이.
 /// Start() 다음 프레임에 RectTransform 실제 크기를 읽어 점 간격과 지름을 자동 계산하므로
 /// 해상도/화면 크기에 무관하게 항상 화면을 꽉 채운다.
 /// </summary>
+[ExecuteAlways]
 [RequireComponent(typeof(Image))]
 public class BrailleCellDisplay : MonoBehaviour
 {
@@ -29,16 +33,38 @@ public class BrailleCellDisplay : MonoBehaviour
     public int Columns => dotColumns;
     public int columns => dotColumns;
 
+    /// <summary>GameEngine이 설정. 터치 시 버튼 단위 하이라이트에 사용.</summary>
+    [HideInInspector] public BrailleCircleButton[] buttons;
+
     private BrailleCell[,] cells;
     private Canvas          _canvas;
 
     void Awake() => _canvas = GetComponentInParent<Canvas>();
 
+    void OnEnable()
+    {
+#if UNITY_EDITOR
+        // 에디터 모드: Canvas 레이아웃이 이미 확정돼 있으므로 바로 빌드
+        if (!Application.isPlaying)
+            Build();
+#endif
+    }
+
     System.Collections.IEnumerator Start()
     {
-        yield return null; // 레이아웃 확정 대기 (Canvas가 실제 크기를 계산한 뒤 실행)
+        // 플레이 모드: 첫 프레임에 Canvas가 실제 크기를 계산한 뒤 빌드
+        if (!Application.isPlaying) yield break;
+        yield return null;
         Build();
     }
+
+#if UNITY_EDITOR
+    void OnValidate()
+    {
+        // 인스펙터 값 변경 시 에디터에서 즉시 리빌드
+        EditorApplication.delayCall += () => { if (this != null) Build(); };
+    }
+#endif
 
     public void Build()
     {
@@ -111,15 +137,20 @@ public class BrailleCellDisplay : MonoBehaviour
     public void ClearAll()
     {
         if (cells == null) return;
-        for (int r = 0; r < dotRows; r++)
-            for (int c = 0; c < dotColumns; c++)
+        int rows = cells.GetLength(0);
+        int cols = cells.GetLength(1);
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < cols; c++)
                 cells[r, c]?.Clear();
     }
 
     public void Refresh() { }
 
+    // cells 배열의 실제 크기로 검사 — dotRows/dotColumns와 배열이 잠깐 어긋날 때 방어
     bool InBounds(int row, int col) =>
-        (uint)row < (uint)dotRows && (uint)col < (uint)dotColumns;
+        cells != null &&
+        (uint)row < (uint)cells.GetLength(0) &&
+        (uint)col < (uint)cells.GetLength(1);
 
     // --- 터치 하이라이트 ---
 
@@ -129,22 +160,29 @@ public class BrailleCellDisplay : MonoBehaviour
 
         Camera uiCam = _canvas != null ? _canvas.worldCamera : null;
 
-        // 모바일 멀티터치
+        // 터치된 셀 하나를 추출 (멀티터치 중 첫 번째 유효 터치)
+        int tr = -1, tc = -1;
+        bool touched = false;
+
         for (int i = 0; i < Input.touchCount; i++)
         {
-            Touch touch = Input.GetTouch(i);
-            if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
-                continue;
-            if (TryGetCellAt(touch.position, uiCam, out int r, out int c))
-                cells[r, c].SetHighlight(true);
+            Touch t = Input.GetTouch(i);
+            if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled) continue;
+            if (TryGetCellAt(t.position, uiCam, out tr, out tc)) { touched = true; break; }
         }
 
-        // PC / 에디터 마우스 (좌클릭)
-        if (Input.GetMouseButton(0))
-        {
-            if (TryGetCellAt(Input.mousePosition, uiCam, out int r, out int c))
-                cells[r, c].SetHighlight(true);
-        }
+        if (!touched && Input.GetMouseButton(0))
+            touched = TryGetCellAt(Input.mousePosition, uiCam, out tr, out tc);
+
+        if (!touched || !InBounds(tr, tc)) return;
+
+        // 버튼 영역이면 해당 버튼 전체를 하이라이트
+        if (buttons != null)
+            foreach (var btn in buttons)
+                if (btn.Contains(tr, tc, this)) { btn.SetHighlight(this, true); return; }
+
+        // 버튼 바깥 셀은 개별 하이라이트
+        cells[tr, tc].SetHighlight(true);
     }
 
     bool TryGetCellAt(Vector2 screenPos, Camera uiCam, out int row, out int col)
@@ -162,8 +200,8 @@ public class BrailleCellDisplay : MonoBehaviour
         if (normX < 0f || normX >= 1f || normY < 0f || normY >= 1f)
             return false;
 
-        col = Mathf.FloorToInt(normX * dotColumns);
-        row = Mathf.FloorToInt((1f - normY) * dotRows); // row 0 = 맨 위
+        col = Mathf.FloorToInt(normX * cells.GetLength(1));
+        row = Mathf.FloorToInt((1f - normY) * cells.GetLength(0)); // row 0 = 맨 위
         return true;
     }
 }
