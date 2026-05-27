@@ -182,6 +182,8 @@ public class GameEngine : MonoBehaviour
             int lane = n.data.lane;
             if (lane < 0 || lane >= LaneCount || n.isHit) continue;
             float timeLeft = n.data.time - now;
+
+            // 쳐야 하는 노트이며 & 남은 시간이 previewWindow 보다 적으면
             if (timeLeft >= 0f && timeLeft <= previewWindow)
                 activations[lane] = Mathf.Max(activations[lane], 1f - timeLeft / previewWindow);
         }
