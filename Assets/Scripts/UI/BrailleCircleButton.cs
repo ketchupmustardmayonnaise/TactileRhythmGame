@@ -4,6 +4,10 @@ using UnityEngine;
 /// 점자 디스플레이 위에 렌더링되는 원형 버튼 하나.
 /// 위치·크기는 모두 그리드 대비 비율(0~1)로 저장하므로
 /// dotRows / dotColumns가 바뀌어도 같은 비율로 배치된다.
+///
+/// 렌더링은 거리장(distance field) 기반 이진(on/off) 방식이다.
+/// 각 셀 중심에서 원 중심까지 거리를 구해 테두리 링 안이면 점을 켠다.
+/// 실제 점자 디스플레이처럼 점은 완전히 켜지거나 꺼지며, 그라데이션이 없다.
 /// </summary>
 [System.Serializable]
 public class BrailleCircleButton
@@ -13,12 +17,12 @@ public class BrailleCircleButton
     [Tooltip("열 방향 위치 비율 (0 = 왼쪽, 1 = 오른쪽)")]
     [Range(0f, 1f)] public float colRatio;
     [Tooltip("반지름 (그리드 행 높이 기준 비율)")]
-    [Range(0f, 0.5f)] public float radiusRatio = 0.081f;
+    [Range(0f, 0.5f)] public float radiusRatio = 0.11f;
     [Tooltip("테두리 두께 (반지름 대비 비율)")]
-    [Range(0f, 1f)] public float thicknessRatio = 0.46f;
+    [Range(0f, 1f)] public float thicknessRatio = 0.28f;
 
     public BrailleCircleButton(float rowRatio, float colRatio,
-                               float radiusRatio = 0.081f, float thicknessRatio = 0.46f)
+                               float radiusRatio = 0.11f, float thicknessRatio = 0.28f)
     {
         this.rowRatio       = rowRatio;
         this.colRatio       = colRatio;
@@ -26,12 +30,14 @@ public class BrailleCircleButton
         this.thicknessRatio = thicknessRatio;
     }
 
-    /// <summary>아이들 화면용 — activation=1로 테두리를 그린다.</summary>
+    /// <summary>아이들 화면용 — 테두리(링)를 또렷하게 그린다.</summary>
     public void Draw(BrailleCellDisplay display) => DrawWithActivation(display, 1f);
 
-    /// <summary>노트 예고 — activation(0~1) 값으로 테두리 밝기를 조절한다.</summary>
+    /// <summary>테두리 링을 그린다. t ≤ 0 이면 그리지 않는다(이진 on/off, 그라데이션 없음).</summary>
     public void DrawWithActivation(BrailleCellDisplay display, float t)
     {
+        if (t <= 0f) return;
+
         ComputeGeometry(display, out float cr, out float cc,
                         out float radius, out float thickness, out float ax, out float colR);
         ComputeBounds(display, cr, cc, radius, colR,
@@ -39,18 +45,13 @@ public class BrailleCircleButton
 
         for (int r = rMin; r <= rMax; r++)
             for (int c = cMin; c <= cMax; c++)
-            {
-                float dr   = r - cr;
-                float dc   = (c - cc) * ax;
-                float dist = Mathf.Sqrt(dr * dr + dc * dc);
-                if (Mathf.Abs(dist - radius) <= thickness)
-                    display.SetDotActivation(r, c, t);
-            }
+                if (InRing(Distance(r, c, cr, cc, ax), radius, thickness))
+                    display.SetDotActivation(r, c, 1f);
     }
 
     /// <summary>
-    /// 테두리는 항상 active(1), 내부만 interiorT(0~1)로 채운다.
-    /// 노트 접근 시 내부가 서서히 밝아지는 효과용.
+    /// 테두리는 항상 켜고, 내부는 interiorT(0~1)에 따라 안쪽 → 바깥쪽으로
+    /// 채워지는 원판이 점점 커진다. 각 점은 완전히 켜지거나 꺼진 이진 상태(그라데이션 없음).
     /// </summary>
     public void DrawFill(BrailleCellDisplay display, float interiorT)
     {
@@ -59,19 +60,15 @@ public class BrailleCircleButton
         ComputeBounds(display, cr, cc, radius, colR,
                       out int rMin, out int rMax, out int cMin, out int cMax);
 
-        float innerEdge = radius - thickness;   // 테두리 안쪽 경계
+        float innerEdge  = radius - thickness;                 // 테두리 안쪽 경계
+        float fillRadius = innerEdge * Mathf.Clamp01(interiorT); // 채워진 원판 반지름
 
         for (int r = rMin; r <= rMax; r++)
             for (int c = cMin; c <= cMax; c++)
             {
-                float dr   = r - cr;
-                float dc   = (c - cc) * ax;
-                float dist = Mathf.Sqrt(dr * dr + dc * dc);
-
-                if (Mathf.Abs(dist - radius) <= thickness)
-                    display.SetDotActivation(r, c, 1f);        // 테두리: 항상 밝게
-                else if (dist < innerEdge)
-                    display.SetDotActivation(r, c, interiorT); // 내부: 0→1 점진
+                float dist = Distance(r, c, cr, cc, ax);
+                if (InRing(dist, radius, thickness) || dist <= fillRadius)
+                    display.SetDotActivation(r, c, 1f);
             }
     }
 
@@ -80,9 +77,7 @@ public class BrailleCircleButton
     {
         ComputeGeometry(display, out float cr, out float cc,
                         out float radius, out _, out float ax, out _);
-        float dr = row - cr;
-        float dc = (col - cc) * ax;
-        return Mathf.Sqrt(dr * dr + dc * dc) <= radius + 0.5f;
+        return Distance(row, col, cr, cc, ax) <= radius + 0.5f;
     }
 
     /// <summary>원 내부 + 테두리 전체를 파란색 하이라이트 on/off.</summary>
@@ -95,13 +90,21 @@ public class BrailleCircleButton
 
         for (int r = rMin; r <= rMax; r++)
             for (int c = cMin; c <= cMax; c++)
-            {
-                float dr   = r - cr;
-                float dc   = (c - cc) * ax;
-                float dist = Mathf.Sqrt(dr * dr + dc * dc);
-                if (dist <= radius + thickness * 0.5f)
+                if (Distance(r, c, cr, cc, ax) <= radius + thickness)
                     display.SetDotHighlight(r, c, on);
-            }
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>셀이 테두리 링 안에 있는지 (이진 판정).</summary>
+    static bool InRing(float dist, float radius, float thickness) =>
+        Mathf.Abs(dist - radius) <= thickness;
+
+    static float Distance(int r, int c, float cr, float cc, float ax)
+    {
+        float dr = r - cr;
+        float dc = (c - cc) * ax;
+        return Mathf.Sqrt(dr * dr + dc * dc);
     }
 
     // ── geometry helpers ──────────────────────────────────────────────────────
@@ -123,10 +126,11 @@ public class BrailleCircleButton
                               float cr, float cc, float radius, float colR,
                               out int rMin, out int rMax, out int cMin, out int cMax)
     {
-        rMin = Mathf.Max(0,                   Mathf.FloorToInt(cr - radius - 1));
-        rMax = Mathf.Min(display.Rows - 1,    Mathf.CeilToInt (cr + radius + 1));
-        cMin = Mathf.Max(0,                   Mathf.FloorToInt(cc - colR   - 1));
-        cMax = Mathf.Min(display.Columns - 1, Mathf.CeilToInt (cc + colR   + 1));
+        // 거리 계산 범위는 테두리 바깥 AA 폭까지 포함해야 하므로 여유 +2
+        rMin = Mathf.Max(0,                   Mathf.FloorToInt(cr - radius - 2));
+        rMax = Mathf.Min(display.Rows - 1,    Mathf.CeilToInt (cr + radius + 2));
+        cMin = Mathf.Max(0,                   Mathf.FloorToInt(cc - colR   - 2));
+        cMax = Mathf.Min(display.Columns - 1, Mathf.CeilToInt (cc + colR   + 2));
     }
 
     static float Aspect(BrailleCellDisplay display)
