@@ -29,7 +29,7 @@ public class GameScreen : MonoBehaviour
     private static readonly KeyCode[] DebugKeys =
     {
         KeyCode.S, KeyCode.D, KeyCode.F,   // 왼쪽 1-3
-        KeyCode.J, KeyCode.K, KeyCode.L    // 오른쪽 4-6
+        KeyCode.J, KeyCode.L, KeyCode.K    // 오른쪽 4-6
     };
 
     void Start()
@@ -66,6 +66,8 @@ public class GameScreen : MonoBehaviour
 
     void HandleTap(int lane)
     {
+        if (SfxPlayer.Instance != null) SfxPlayer.Instance.PlayClap();
+
         HitResult result = engine.TapLane(lane);
         switch (result)
         {
