@@ -4,9 +4,11 @@ using UnityEngine.UI;
 
 /// <summary>
 /// BrailleCell(점 하나)을 dotRows × dotColumns 그리드로 배치하는 점자 디스플레이.
-/// Start() 다음 프레임에 RectTransform 실제 크기를 읽어 점 간격과 지름을 자동 계산하므로
+/// RectTransform 실제 크기를 읽어 점 간격과 지름을 자동 계산하므로
 /// 해상도/화면 크기에 무관하게 항상 화면을 꽉 채운다.
+/// [ExecuteAlways]: Play를 누르지 않아도 Scene 뷰에서 바로 셀 그리드가 보이도록 에디터에서도 실행된다.
 /// </summary>
+[ExecuteAlways]
 [RequireComponent(typeof(Image))]
 public class BrailleCellDisplay : MonoBehaviour
 {
@@ -34,10 +36,26 @@ public class BrailleCellDisplay : MonoBehaviour
 
     void Awake() => _canvas = GetComponentInParent<Canvas>();
 
-    System.Collections.IEnumerator Start()
+    void OnEnable()
+    {
+        if (Application.isPlaying)
+            StartCoroutine(BuildNextFrame());
+        else
+            Build(); // 에디터(Scene 뷰): 레이아웃이 이미 확정되어 있으므로 바로 빌드
+    }
+
+    System.Collections.IEnumerator BuildNextFrame()
     {
         yield return null; // 레이아웃 확정 대기 (Canvas가 실제 크기를 계산한 뒤 실행)
         Build();
+    }
+
+    // 에디터에서 Inspector 값(그리드 크기, 색상 등)을 바꾸거나 RectTransform 크기가
+    // 바뀌면 Scene 뷰에 바로 반영되도록 다시 빌드한다.
+    void OnRectTransformDimensionsChange()
+    {
+        if (!Application.isPlaying && isActiveAndEnabled)
+            Build();
     }
 
     public void Build()
@@ -125,7 +143,7 @@ public class BrailleCellDisplay : MonoBehaviour
 
     void LateUpdate()
     {
-        if (cells == null) return;
+        if (!Application.isPlaying || cells == null) return;
 
         Camera uiCam = _canvas != null ? _canvas.worldCamera : null;
 
@@ -146,6 +164,10 @@ public class BrailleCellDisplay : MonoBehaviour
                 cells[r, c].SetHighlight(true);
         }
     }
+
+    /// <summary>화면 좌표(마우스/터치)가 가리키는 셀의 (row, col)을 구한다. 외부(내비게이션 등)에서도 사용.</summary>
+    public bool TryGetCellAt(Vector2 screenPos, out int row, out int col) =>
+        TryGetCellAt(screenPos, _canvas != null ? _canvas.worldCamera : null, out row, out col);
 
     bool TryGetCellAt(Vector2 screenPos, Camera uiCam, out int row, out int col)
     {

@@ -1,0 +1,73 @@
+{
+  "title": "산토끼",
+  "composer": "이일래",
+  "keySignature": "C Major",
+  "sharpsOrFlats": 0,
+  "timeSignature": { "beatsPerMeasure": 3, "beatUnit": 4 },
+  "tempoBpm": 108,
+  "tempoMarking": "경쾌하게",
+  "clef": "treble",
+  "measures": [
+    {
+      "number": 1,
+      "notes": [
+        { "pitch": "G4", "solfege": "솔", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "G4", "solfege": "솔", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "G4", "solfege": "솔", "duration": "quarter", "beats": 1.0 }
+      ]
+    },
+    {
+      "number": 2,
+      "notes": [
+        { "pitch": "C5", "solfege": "도", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "D5", "solfege": "레", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "E5", "solfege": "미", "duration": "quarter", "beats": 1.0 }
+      ]
+    },
+    {
+      "number": 3,
+      "notes": [
+        { "pitch": "G5", "solfege": "솔", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "E5", "solfege": "미", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "C5", "solfege": "도", "duration": "quarter", "beats": 1.0 }
+      ]
+    },
+    {
+      "number": 4,
+      "notes": [
+        { "pitch": "D5", "solfege": "레", "duration": "dotted-half", "beats": 3.0 }
+      ]
+    },
+    {
+      "number": 5,
+      "notes": [
+        { "pitch": "G5", "solfege": "솔", "duration": "eighth", "beats": 0.5 },
+        { "pitch": "A5", "solfege": "라", "duration": "eighth", "beats": 0.5 },
+        { "pitch": "G5", "solfege": "솔", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "E5", "solfege": "미", "duration": "quarter", "beats": 1.0 }
+      ]
+    },
+    {
+      "number": 6,
+      "notes": [
+        { "pitch": "C5", "solfege": "도", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "D5", "solfege": "레", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "E5", "solfege": "미", "duration": "quarter", "beats": 1.0 }
+      ]
+    },
+    {
+      "number": 7,
+      "notes": [
+        { "pitch": "G5", "solfege": "솔", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "E5", "solfege": "미", "duration": "quarter", "beats": 1.0 },
+        { "pitch": "D5", "solfege": "레", "duration": "quarter", "beats": 1.0 }
+      ]
+    },
+    {
+      "number": 8,
+      "notes": [
+        { "pitch": "C5", "solfege": "도", "duration": "dotted-half", "beats": 3.0 }
+      ]
+    }
+  ]
+}
