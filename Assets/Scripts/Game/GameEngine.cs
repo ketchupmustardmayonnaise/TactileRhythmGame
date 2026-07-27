@@ -4,7 +4,8 @@ using UnityEngine;
 /// <summary>
 /// 게임 핵심 로직. AudioManager와 BrailleCellDisplay를 연결해서
 /// 노트 스폰 → 이동 → 판정 → 렌더링 루프를 처리한다.
-/// 레인 수 = idleButtons 배열 길이 (기본 6: 왼쪽 1-3, 오른쪽 4-6).
+/// 레인 수 = idleButtons 배열 길이 (2 / 4 / 6). keyMode로 배치를 전환한다.
+/// 6key는 인스펙터에 설정된 원본 배치를 그대로 사용한다(코드로 덮어쓰지 않음).
 /// </summary>
 [ExecuteAlways]
 public class GameEngine : MonoBehaviour
@@ -15,16 +16,20 @@ public class GameEngine : MonoBehaviour
 
     [Header("Timing Windows (초)")]
     public float windowPerfect = 0.07f;
-    public float windowGood    = 0.14f;
+    public float windowGood = 0.14f;
     [Tooltip("버튼 activation 0→1 시간(초). LoadSong 시 seconds_per_beat로 자동 설정됨")]
     public float previewWindow = 0.5f;
+
+    [Header("Key Mode")]
+    [Tooltip("레인 수(2/4/6). 메뉴에서 SetKeyMode로 설정됨. 인스펙터 값은 에디터 미리보기용")]
+    public int keyMode = 6;
 
     [Header("Idle Screen Buttons  (왼쪽 1-3, 오른쪽 4-6)")]
     public BrailleCircleButton[] idleButtons;
 
     // 공개 상태
-    public int  Score     { get; private set; }
-    public int  Combo     { get; private set; }
+    public int Score { get; private set; }
+    public int Combo { get; private set; }
     public bool IsRunning { get; private set; }
 
     /// <summary>레인 수 = 버튼 수</summary>
@@ -35,6 +40,9 @@ public class GameEngine : MonoBehaviour
     private readonly List<ActiveNote> activeNotes = new();
     private float[] laneFlash;
 
+    /// <summary>인스펙터/씬에 설정된 원본 6key 배치 보존 (6key 복원용)</summary>
+    private BrailleCircleButton[] sixKeyButtons;
+
     // ── Unity 생명주기 ────────────────────────────────────────────────────────
 
     void Awake()
@@ -42,6 +50,7 @@ public class GameEngine : MonoBehaviour
         if (idleButtons == null || idleButtons.Length == 0)
             idleButtons = DefaultButtons();
 
+        sixKeyButtons = idleButtons;      // 원본 6key 배치 보존 (SetKeyMode(6)에서 복원)
         laneFlash = new float[LaneCount];
 
         if (display != null)
@@ -72,13 +81,30 @@ public class GameEngine : MonoBehaviour
 
     // ── 공개 API ─────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// 레인 모드(2/4/6) 전환.
+    /// 2/4key는 코드 배치를 사용하고, 6key는 인스펙터 원본을 그대로 복원한다.
+    /// </summary>
+    public void SetKeyMode(int mode)
+    {
+        keyMode = mode;
+        idleButtons = mode == 2 ? TwoKeyButtons()
+                    : mode == 4 ? FourKeyButtons()
+                    : (sixKeyButtons ?? DefaultButtons());   // 6key: 원본 유지
+
+        laneFlash = new float[idleButtons.Length];
+
+        if (display != null)
+            display.buttons = idleButtons;
+    }
+
     public void LoadSong(SongData songData)
     {
-        song        = songData;
+        song = songData;
         nextNoteIdx = 0;
-        Score       = 0;
-        Combo       = 0;
-        IsRunning   = false;
+        Score = 0;
+        Combo = 0;
+        IsRunning = false;
         activeNotes.Clear();
         laneFlash = new float[LaneCount];
 
@@ -107,8 +133,8 @@ public class GameEngine : MonoBehaviour
         if (!IsRunning || lane < 0 || lane >= LaneCount) return HitResult.None;
 
         float now = (float)audioManager.SongTime;
-        ActiveNote best     = null;
-        float      bestDiff = float.MaxValue;
+        ActiveNote best = null;
+        float bestDiff = float.MaxValue;
 
         foreach (var n in activeNotes)
         {
@@ -117,9 +143,9 @@ public class GameEngine : MonoBehaviour
             if (diff < bestDiff) { bestDiff = diff; best = n; }
         }
 
-        if (best == null)              { laneFlash[lane] = 0.12f; return HitResult.None; }
+        if (best == null) { laneFlash[lane] = 0.12f; return HitResult.None; }
         if (bestDiff <= windowPerfect) { RegisterHit(best, lane, 300); return HitResult.Perfect; }
-        if (bestDiff <= windowGood)    { RegisterHit(best, lane, 100); return HitResult.Good; }
+        if (bestDiff <= windowGood) { RegisterHit(best, lane, 100); return HitResult.Good; }
 
         laneFlash[lane] = 0.12f;
         return HitResult.None;
@@ -206,12 +232,38 @@ public class GameEngine : MonoBehaviour
         display.Refresh();
     }
 
-    // ── 기본 6버튼 배치 (왼쪽 1-3 / 오른쪽 4-6) ────────────────────────────
+    // ── 모드별 버튼 배치 ─────────────────────────────────────────────────────
+    //   BrailleCircleButton(rowRatio, colRatio, radiusRatio, thicknessRatio)
+    //   rowRatio: 0=위, 1=아래 (세로)  /  colRatio: 0=왼쪽, 1=오른쪽 (가로)
+    //   thicknessRatio는 원본 6key 링과 같은 절대 두께(≈0.6 dot, 한 줄)가 되도록 지정.
+
+    // 2key: 좌/우 중앙 (D / K)
+    static BrailleCircleButton[] TwoKeyButtons()
+    {
+        return new BrailleCircleButton[]
+        {
+            new BrailleCircleButton(0.5f, 0.25f, 0.14f, 0.266f),   // Lane 0: 왼쪽  (D)
+            new BrailleCircleButton(0.5f, 0.75f, 0.14f, 0.266f),   // Lane 1: 오른쪽 (K)
+        };
+    }
+
+    // 4key: 좌열(위/아래) + 우열(위/아래) (W S / I K)
+    static BrailleCircleButton[] FourKeyButtons()
+    {
+        return new BrailleCircleButton[]
+        {
+            new BrailleCircleButton(0.30f, 0.25f, 0.11f, 0.339f),  // Lane 0: 왼쪽 위   (W)
+            new BrailleCircleButton(0.70f, 0.25f, 0.11f, 0.339f),  // Lane 1: 왼쪽 아래 (S)
+            new BrailleCircleButton(0.30f, 0.75f, 0.11f, 0.339f),  // Lane 2: 오른쪽 위   (I)
+            new BrailleCircleButton(0.70f, 0.75f, 0.11f, 0.339f),  // Lane 3: 오른쪽 아래 (K)
+        };
+    }
+
+    // ── 기본 6버튼 배치 (왼쪽 1-3 / 오른쪽 4-6) — 원본 그대로, 인스펙터 비었을 때만 사용 ──
 
     static BrailleCircleButton[] DefaultButtons()
     {
-        // 기존 배치 그대로 — 상단 4개 + 하단 2개
-        // 왼쪽(Lane 1-3): col 5, 15, 10  / 오른쪽(Lane 4-6): col 25, 35, 30
+        // 상단 4개 + 하단 2개
         return new BrailleCircleButton[]
         {
             new BrailleCircleButton(4.5f/16f,  5f/40f),   // Lane 1 (왼쪽 상단)
