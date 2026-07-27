@@ -153,6 +153,7 @@ public class GameScreen : MonoBehaviour
 
     void HandleTap(int lane)
     {
+        if (SfxPlayer.Instance != null) SfxPlayer.Instance.PlayClap();
         HitResult result = engine.TapLane(lane);
         switch (result)
         {
