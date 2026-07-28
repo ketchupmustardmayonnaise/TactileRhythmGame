@@ -17,7 +17,10 @@ public class GameEngine : MonoBehaviour
     [Header("Timing Windows (초)")]
     public float windowPerfect = 0.07f;
     public float windowGood = 0.14f;
-    [Tooltip("버튼 activation 0→1 시간(초). LoadSong 시 seconds_per_beat로 자동 설정됨")]
+    [Tooltip("체크하면 채보의 seconds_per_beat를 무시하고 아래 previewWindow 값을 인스펙터에서 그대로 사용")]
+    public bool overridePreviewWindow = false;
+    [Tooltip("노트 예고 시간(초): 노트가 다가오며 버튼 activation이 0→1 되는 시간. " +
+             "Override가 체크돼 있으면 이 값이 그대로 적용되고, 아니면 곡 로드 시 채보 값으로 덮어써짐")]
     public float previewWindow = 0.5f;
 
     [Header("Key Mode")]
@@ -108,8 +111,9 @@ public class GameEngine : MonoBehaviour
         activeNotes.Clear();
         laneFlash = new float[LaneCount];
 
-        // seconds_per_beat → previewWindow
-        if (song.meta != null && song.meta.seconds_per_beat > 0f)
+        // 예고 시간: Override가 꺼져 있을 때만 채보의 seconds_per_beat로 자동 설정.
+        // (Override 체크 시에는 인스펙터의 previewWindow 값을 그대로 유지)
+        if (!overridePreviewWindow && song.meta != null && song.meta.seconds_per_beat > 0f)
         {
             previewWindow = song.meta.seconds_per_beat;
         }

@@ -33,10 +33,9 @@ public class GameScreen : MonoBehaviour
     public float countdownSeconds = 3f;
 
     // ── 모드별 키 배치 ────────────────────────────────────────────────────────
-    // 이 세 배열이 각 모드의 '키 → 레인' 매핑의 유일한 출처다. (배열 index = 레인 index)
     //   2key = D/K
     //   4key = W S / I K
-    //   6key = S D F / J L K   ← 오른쪽 K, L 스왑 적용 (index 4=L, index 5=K)
+    //   6key = S D F / J L K
     private static readonly KeyCode[] Keys2 = { KeyCode.D, KeyCode.K };
     private static readonly KeyCode[] Keys4 = { KeyCode.W, KeyCode.S, KeyCode.I, KeyCode.K };
     private static readonly KeyCode[] Keys6 = { KeyCode.S, KeyCode.D, KeyCode.F,

@@ -35,6 +35,9 @@ LOOK_AHEAD    = (JUDGE_Y - SPAWN_Y) / NOTE_SPEED   # 몇 초 앞 노트까지 �
 LANE_MARGIN   = 60                # 양쪽 여백
 GAP           = 24                # 왼손/오른손 그룹 사이 간격
 
+CLAP_PATH     = "Clap.mp3"        # 판정 위치 도달 시 재생할 효과음
+CLAP_VOLUME   = 0.8               # 효과음 볼륨(0.0~1.0)
+
 # 색상
 BG          = (18, 18, 26)
 LANE_BG     = (28, 28, 40)
@@ -192,6 +195,19 @@ class Visualizer:
             print(f"[경고] 오디오 로드 실패: {e}")
             self.duration = self.notes[-1][0] + 5.0 if self.notes else 60.0
 
+        # 판정 위치 도달 효과음(Clap) 로드 — 배경 음악과 별도 채널로 재생됨
+        self.clap = None
+        clap_path = CLAP_PATH if os.path.exists(CLAP_PATH) \
+            else os.path.join(os.path.dirname(os.path.abspath(self.audio_path)), CLAP_PATH)
+        try:
+            self.clap = pygame.mixer.Sound(clap_path)
+            self.clap.set_volume(CLAP_VOLUME)
+            # 동시치기 등으로 여러 번 겹쳐도 끊기지 않도록 채널을 넉넉히 확보
+            pygame.mixer.set_num_channels(16)
+            print(f"[효과음] Clap 로드 완료: {clap_path}")
+        except Exception as e:
+            print(f"[경고] Clap 효과음 로드 실패({CLAP_PATH}): {e} — 효과음 없이 진행합니다.")
+
     # ── 재생 / 시간 ──────────────────────────────────────
     def start_playback(self):
         pygame.mixer.music.play(start=self.song_time)
@@ -232,15 +248,22 @@ class Visualizer:
                 break
 
         remove = []
+        hit_this_frame = False        # 이 프레임에 판정선에 닿은 노트가 있는지
         for note in self.active:
             note["y"] += NOTE_SPEED * dt
             if note["y"] > JUDGE_Y:
                 li = note["lane"] - 1
                 if 0 <= li < self.lane_count:
                     self.flash[li] = FLASH_MS
+                hit_this_frame = True
                 remove.append(note)
         for n in remove:
             self.active.remove(n)
+
+        # 판정 위치에 노트가 닿으면 Clap 재생.
+        # 동시치기로 여러 노트가 한 프레임에 닿아도 한 번만 재생해 소리가 과해지지 않게 한다.
+        if hit_this_frame and self.clap is not None:
+            self.clap.play()
 
         self.flash = [max(0, v - dt * 1000) for v in self.flash]
 
@@ -437,4 +460,4 @@ if __name__ == "__main__":
     if not os.path.exists(args.chart):
         sys.exit(f"채보 파일 없음: {args.chart}")
 
-    Visualizer(args.chart, args.audio, args.keys).run()
+    Visualizer(args.chart, args.audio, args.keys).run() 
