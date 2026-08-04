@@ -48,13 +48,13 @@ public class GameScreen : MonoBehaviour
     public float countdownSeconds = 3f;
 
     // ── 점수 정규화 설정 ──────────────────────────────────────────────────────
-    private const int   MAX_SCORE      = 1_000_000; // 정규화 목표 만점
+    private const int MAX_SCORE = 1_000_000; // 정규화 목표 만점
     private const float PERFECT_WEIGHT = 1.0f;      // Perfect 1개당 기여 비율
-    private const float GOOD_WEIGHT    = 0.5f;      // Good 1개당 기여 비율
+    private const float GOOD_WEIGHT = 0.5f;      // Good 1개당 기여 비율
 
-    private int   totalNotes;      // 현재 채보의 총 노트 수
+    private int totalNotes;      // 현재 채보의 총 노트 수
     private float achievedWeight;  // 누적 획득 가중치
-    private int   normalizedScore; // 표시용 정규화 점수(0 ~ MAX_SCORE)
+    private int normalizedScore; // 표시용 정규화 점수(0 ~ MAX_SCORE)
 
     // ── 판정 개수 집계 ────────────────────────────────────────────────────────
     private int perfectCount, goodCount, missCount;
@@ -63,19 +63,19 @@ public class GameScreen : MonoBehaviour
     private static readonly KeyCode[] Keys2 = { KeyCode.D, KeyCode.K };
     private KeyCode[] activeKeys = Keys2;
 
-    private bool  inMenu = true;
+    private bool inMenu = true;
     private float judgmentTimer;
 
     // ── 타이밍 조정 상태 ──────────────────────────────────────────────────────
     private bool calibrating;
     private bool calibFinalizing;
     private readonly List<float> calibSamples = new();
-    private const int   CALIB_INTERVAL_BEATS = 24;    // 채보에 넣을 노트 수
-    private const float CALIB_INTERVAL       = 0.5f;  // 노트 간격(초) = 120BPM
-    private const float CALIB_FIRST          = 1.0f;  // 첫 노트 시각(초)
-    private const float CALIB_PREVIEW        = 0.5f;  // 예고 시간(초)
-    private const int   CALIB_TARGET         = 16;    // 목표 표본 수(모이면 종료)
-    private const int   CALIB_MIN            = 4;     // 유효 최소 표본 수
+    private const int CALIB_INTERVAL_BEATS = 24;    // 채보에 넣을 노트 수
+    private const float CALIB_INTERVAL = 0.5f;  // 노트 간격(초) = 120BPM
+    private const float CALIB_FIRST = 1.0f;  // 첫 노트 시각(초)
+    private const float CALIB_PREVIEW = 0.5f;  // 예고 시간(초)
+    private const int CALIB_TARGET = 16;    // 목표 표본 수(모이면 종료)
+    private const int CALIB_MIN = 4;     // 유효 최소 표본 수
 
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ public class GameScreen : MonoBehaviour
     {
         if (engine != null)
         {
-            engine.OnJudge    += HandleJudge;
+            engine.OnJudge += HandleJudge;
             engine.OnFinished += HandleFinished;
         }
         if (menuRoot != null) menuBg = menuRoot.GetComponent<UnityEngine.UI.Image>();
@@ -111,7 +111,7 @@ public class GameScreen : MonoBehaviour
     {
         if (engine != null)
         {
-            engine.OnJudge    -= HandleJudge;
+            engine.OnJudge -= HandleJudge;
             engine.OnFinished -= HandleFinished;
         }
     }
@@ -143,9 +143,9 @@ public class GameScreen : MonoBehaviour
             return;
         }
 
-        string avail  = ResolveChart(songResourceName) != null ? "" : "   (채보 없음)";
+        string avail = ResolveChart(songResourceName) != null ? "" : "   (채보 없음)";
         string offStr = OffsetLabel(PlayerPrefs.GetFloat(GameEngine.PrefKeyPreviewOffset, 0f));
-        string head   = string.IsNullOrEmpty(notice) ? "" : $"<color=#ff6666>{notice}</color>\n\n";
+        string head = string.IsNullOrEmpty(notice) ? "" : $"<color=#ff6666>{notice}</color>\n\n";
 
         menuText.gameObject.SetActive(true);
         menuText.text =
@@ -184,7 +184,7 @@ public class GameScreen : MonoBehaviour
 
     void ResetCounters(SongData song)
     {
-        totalNotes    = (song?.notes != null) ? song.notes.Count : 0;
+        totalNotes = (song?.notes != null) ? song.notes.Count : 0;
         achievedWeight = 0f;
         normalizedScore = 0;
         perfectCount = goodCount = missCount = 0;
@@ -227,8 +227,8 @@ public class GameScreen : MonoBehaviour
 
     void HandleTap(int lane)
     {
-        if (SfxPlayer.Instance != null) SfxPlayer.Instance.PlayClap();
-        engine.TapLane(lane);   // 채점/개수는 engine.OnJudge → HandleJudge 에서 처리
+        // 소리는 여기(입력 시점)가 아니라 판정 확정(HandleJudge)에서 결과별로 재생한다.
+        engine.TapLane(lane);   // 채점/개수/소리는 engine.OnJudge → HandleJudge 에서 처리
     }
 
     // ── 판정 이벤트 (Perfect / Good / Miss) ───────────────────────────────────
@@ -237,16 +237,20 @@ public class GameScreen : MonoBehaviour
     {
         if (calibrating) return;   // 타이밍 조정 중엔 집계 안 함
 
+        var sfx = SfxPlayer.Instance;
         switch (result)
         {
             case HitResult.Perfect:
                 perfectCount++; achievedWeight += PERFECT_WEIGHT;
+                if (sfx != null) sfx.PlayPerfect();
                 ShowJudgment("PERFECT", new Color(0.4f, 1f, 1f)); break;
             case HitResult.Good:
-                goodCount++;    achievedWeight += GOOD_WEIGHT;
+                goodCount++; achievedWeight += GOOD_WEIGHT;
+                if (sfx != null) sfx.PlayGood();     // 기존 박수 소리
                 ShowJudgment("GOOD", new Color(1f, 0.9f, 0.3f)); break;
             case HitResult.Miss:
                 missCount++;
+                if (sfx != null) sfx.PlayMiss();     // 빗맞힘 + 놓쳐 지나감 둘 다 여기서
                 ShowJudgment("MISS", new Color(1f, 0.4f, 0.4f)); break;
         }
         RecalcScore();
@@ -275,7 +279,7 @@ public class GameScreen : MonoBehaviour
     void ShowJudgment(string text, Color color)
     {
         if (!judgmentText) return;
-        judgmentText.text  = text;
+        judgmentText.text = text;
         judgmentText.color = color;
         judgmentTimer = 0.5f;
     }
@@ -388,10 +392,10 @@ public class GameScreen : MonoBehaviour
     {
         var song = new SongData
         {
-            source     = "",                 // 오디오는 무음 클립으로 대체
+            source = "",                 // 오디오는 무음 클립으로 대체
             difficulty = "calibration",
-            meta       = new SongMeta { bpm = 120f, seconds_per_beat = CALIB_INTERVAL },
-            notes      = new List<NoteData>(),
+            meta = new SongMeta { bpm = 120f, seconds_per_beat = CALIB_INTERVAL },
+            notes = new List<NoteData>(),
         };
         for (int i = 0; i < CALIB_INTERVAL_BEATS; i++)
         {
