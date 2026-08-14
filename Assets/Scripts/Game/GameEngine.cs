@@ -55,6 +55,33 @@ public class GameEngine : MonoBehaviour
              "양수 = 예고(채워짐)를 그만큼 일찍 완료시켜, 늦게 치는 성향을 보정한다.")]
     public float previewOffset = 0f;
 
+    public enum VibrationMode
+    {
+        FrequencySweep,   // 주파수 감소: 예고 동안 startFrequency → 0Hz
+        Pulse,            // 펄스: 예고 동안 pulseFrequency 로 일정 유지
+    }
+
+    [Header("Braille Vibration (점자 진동)")]
+    [Tooltip("진동 표현 모드.\n" +
+             "FrequencySweep = 예고 시간 동안 주파수가 startFrequency → 0Hz 로 서서히 감소(0Hz = 계속 켜짐 = 타격 타이밍).\n" +
+             "Pulse = 예고 시간 동안 pulseFrequency 로 일정하게 on/off 반복.")]
+    public VibrationMode vibrationMode = VibrationMode.FrequencySweep;
+
+    [Tooltip("[FrequencySweep] 시작 주파수(Hz). 예고가 시작될 때의 on/off 반복 속도. " +
+             "예고가 끝나는 순간 0Hz(= 계속 켜짐)가 된다.")]
+    public float startFrequency = 60f;
+
+    [Tooltip("[Pulse] 예고 시간 동안 유지할 주파수(Hz).")]
+    public float pulseFrequency = 10f;
+
+    [Range(0f, 1f)]
+    [Tooltip("한 주기(cycle) 중 '켜짐(on)'이 차지하는 비율. 0.5 = 절반 켜짐 / 절반 꺼짐.")]
+    public float vibrationDutyCycle = 0.5f;
+
+    [Tooltip("[FrequencySweep] 계단식 주파수 감소 간격(초). 0이면 선형(연속) 감소. " +
+             "예: 0.1 = 100ms 간격으로 주파수를 계단식으로 낮춤.")]
+    public float frequencyStepInterval = 0f;
+
     [Header("Idle Screen Buttons  (왼쪽 = Lane0 / 오른쪽 = Lane1)")]
     [Tooltip("비워두거나 2개가 아니면 코드가 자동으로 2key 배치를 넣는다.")]
     public BrailleCircleButton[] idleButtons;
@@ -77,6 +104,7 @@ public class GameEngine : MonoBehaviour
     private int nextNoteIdx;
     private readonly List<ActiveNote> activeNotes = new();
     private float[] laneFlash;
+    private float[] lanePhase;   // 레인별 진동 위상 누적기(단위: cycles)
     private float lastNoteTime;
     private bool finishedFired;
 
@@ -91,6 +119,7 @@ public class GameEngine : MonoBehaviour
             previewOffset = PlayerPrefs.GetFloat(PrefKeyPreviewOffset, previewOffset);
 
         laneFlash = new float[LaneCount];
+        lanePhase = new float[LaneCount];
         if (display != null)
             display.buttons = idleButtons;
     }
@@ -128,6 +157,7 @@ public class GameEngine : MonoBehaviour
         finishedFired = false;
         activeNotes.Clear();
         laneFlash = new float[LaneCount];
+        lanePhase = new float[LaneCount];
 
         // 2key 밖(레인 인덱스 >= 2)의 노트는 제거해 유령 miss를 방지
         if (song?.notes != null)
@@ -315,20 +345,30 @@ public class GameEngine : MonoBehaviour
     {
         display.ClearAll();
 
-        // 1. 레인별 예고 activation 계산.
+        // 1. 레인별 '가장 임박한 노트'의 남은 시간(timeLeft)을 구한다.
         //    previewOffset 만큼 '완료 시각'을 앞당겨(늦춰) 예고한다.
-        var activations = new float[LaneCount];
+        var laneTimeLeft = new float[LaneCount];
+        var laneHasNote = new bool[LaneCount];
+        for (int i = 0; i < LaneCount; i++) laneTimeLeft[i] = float.MaxValue;
+
         foreach (var n in activeNotes)
         {
             int lane = n.data.lane;
             if (lane < 0 || lane >= LaneCount || n.isHit) continue;
 
             float timeLeft = (n.data.time - previewOffset) - now;
-            if (timeLeft >= 0f && timeLeft <= previewWindow)
-                activations[lane] = Mathf.Max(activations[lane], 1f - timeLeft / previewWindow);
+            if (timeLeft > previewWindow) continue;          // 아직 예고 구간에 진입 전
+            if (timeLeft < laneTimeLeft[lane])               // 가장 임박한(또는 막 지난) 노트
+            {
+                laneTimeLeft[lane] = timeLeft;
+                laneHasNote[lane] = true;
+            }
         }
 
-        // 2. 버튼 렌더 — 테두리는 항상 표시, 내부만 0→1 점진, 히트 시 파란색 플래시
+        // 2. 버튼 렌더 — 테두리는 항상 표시, 내부는 진동(on/off) 상태.
+        //    FrequencySweep: 주파수 startFrequency→0 으로 감소, 0Hz(=timeLeft<=0)에서 계속 켜짐.
+        //    Pulse         : pulseFrequency 로 일정하게 on/off, timeLeft<=0 에서 계속 켜짐.
+        //    히트 시에는 파란색 플래시.
         for (int lane = 0; lane < LaneCount; lane++)
         {
             if (laneFlash[lane] > 0f)
@@ -336,14 +376,63 @@ public class GameEngine : MonoBehaviour
                 laneFlash[lane] -= Time.deltaTime;
                 idleButtons[lane].Draw(display);
                 idleButtons[lane].SetHighlight(display, true);
+                lanePhase[lane] = 0f;
+                continue;
+            }
+
+            if (!laneHasNote[lane])
+            {
+                // 활성 노트 없음 → 내부 꺼짐(테두리만 유지)
+                idleButtons[lane].DrawFill(display, 0f);
+                lanePhase[lane] = 0f;
+                continue;
+            }
+
+            float timeLeft = laneTimeLeft[lane];
+            float interior;
+            if (timeLeft <= 0f)
+            {
+                // 타격 타이밍 도달: 주파수 0 → 계속 켜짐(on)
+                interior = 1f;
+                lanePhase[lane] = 0f;
             }
             else
             {
-                idleButtons[lane].DrawFill(display, activations[lane]);
+                // 시간에 따라 변하는 주파수를 위상에 누적(프레임 레이트와 무관하게 정확)
+                float freq = CurrentFrequency(timeLeft);
+                lanePhase[lane] += freq * Time.deltaTime;
+                float frac = lanePhase[lane] - Mathf.Floor(lanePhase[lane]);
+                interior = (frac < vibrationDutyCycle) ? 1f : 0f;
             }
+
+            idleButtons[lane].DrawFill(display, interior);
         }
 
         display.Refresh();
+    }
+
+    /// <summary>
+    /// 현재 남은 시간(timeLeft, 초)에 대응하는 진동 주파수(Hz)를 계산한다.
+    ///   Pulse          : 항상 pulseFrequency.
+    ///   FrequencySweep : timeLeft==previewWindow 에서 startFrequency,
+    ///                    timeLeft==0 에서 0Hz 로 (선형 또는 계단식) 감소.
+    /// </summary>
+    float CurrentFrequency(float timeLeft)
+    {
+        if (vibrationMode == VibrationMode.Pulse)
+            return Mathf.Max(0f, pulseFrequency);
+
+        float win = Mathf.Max(0.0001f, previewWindow);
+
+        // 계단식: timeLeft 를 step 간격으로 양자화해 주파수를 계단처럼 떨어뜨린다.
+        if (frequencyStepInterval > 0f)
+        {
+            float steppedTimeLeft = Mathf.Ceil(timeLeft / frequencyStepInterval) * frequencyStepInterval;
+            return Mathf.Max(0f, startFrequency * Mathf.Clamp01(steppedTimeLeft / win));
+        }
+
+        // 선형: startFrequency → 0
+        return Mathf.Max(0f, startFrequency * Mathf.Clamp01(timeLeft / win));
     }
 
     // ── 2key 배치 ────────────────────────────────────────────────────────────
