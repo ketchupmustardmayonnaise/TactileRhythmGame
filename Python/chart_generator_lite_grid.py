@@ -17,6 +17,10 @@
   4) 모든 키의 사용 빈도가 비슷하도록 배분
 
 사용법:
+    # 기존 Unity 2key 채보에서 Easy / Single을 함께 생성 (추가 패키지 불필요)
+    python chart_generator_lite_grid.py --test-modes
+    python chart_generator_lite_grid.py --test-modes --min-gap 1.5
+
     python chart_generator_lite.py <오디오파일> --keys 2 [--difficulty easy|normal]
     python chart_generator_lite.py song.mp3 --keys 4 --output song_4k.json
     # 격자 조정 예: 8분음표 격자 + 격자에서 먼 노트 정리
@@ -32,6 +36,12 @@ import sys
 import json
 import random
 import argparse
+
+# 기존 오디오 분석 방식은 유지하고, 테스트용 파생 채보 생성은 별도 모듈로 분리한다.
+# numpy/librosa를 불러오기 전에 분기하므로 테스트 채보 생성에는 Python만 필요하다.
+if __name__ == "__main__" and "--test-modes" in sys.argv[1:]:
+    from chart_test_modes import main
+    sys.exit(main([arg for arg in sys.argv[1:] if arg != "--test-modes"]))
 
 import numpy as np
 

@@ -39,6 +39,8 @@ public class AudioManager : MonoBehaviour
     public void SchedulePlay(AudioClip clip, float delaySeconds, float offset = 0f)
     {
         EnsureSource();
+        src.Stop();
+        src.loop = false;
         src.clip = clip;
         clipOffset = offset;
         scheduledStartDsp = AudioSettings.dspTime + delaySeconds;
@@ -60,4 +62,16 @@ public class AudioManager : MonoBehaviour
         scheduled ? AudioSettings.dspTime - scheduledStartDsp + clipOffset : 0.0;
 
     public bool IsPlaying => EnsureSource().isPlaying;
+
+    /// <summary>예약 재생 전·수동 정지를 제외하고 음원 끝까지 재생했을 때만 true.</summary>
+    public bool HasPlaybackFinished
+    {
+        get
+        {
+            var source = EnsureSource();
+            return scheduled && source.clip != null
+                && AudioSettings.dspTime - scheduledStartDsp >= source.clip.length
+                && !source.isPlaying;
+        }
+    }
 }

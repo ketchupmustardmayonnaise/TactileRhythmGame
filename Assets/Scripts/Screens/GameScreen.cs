@@ -1,17 +1,16 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using TMPro;
 
 /// <summary>
-/// 게임 씬을 총괄한다. (2key 전용)
-/// - 시작 메뉴: [Enter/Space] 게임 시작(2-Key: D/K) · [C] 타이밍 조정
-/// - 채보 파일명 규칙: {songResourceName}_2k  (없으면 무접미사 파일로 폴백)
+/// 게임 씬을 총괄한다. (Classic / Easy / Single)
+/// - 시작 메뉴: [Enter/Space] 게임 시작 · [C] 타이밍 조정 · [F2] 오토 켜기/끄기
+/// - 채보 파일명 규칙: {songResourceName} + RhythmTestModes.ChartSuffix
 /// - 곡 전환: 인스펙터의 Song Resource Name 값을 바꾼다.
 /// - 판정: Perfect / Good / 그 외 전부 Miss. 판정마다 engine.OnJudge 로 집계.
 /// - 곡 종료: engine.OnFinished → 결과창(ResultScreen) 표시.
-/// - ESC: 씬을 리로드해 메뉴로 복귀.
+/// - ESC: 선택한 테스트 모드를 유지하고 메뉴로 복귀.
 /// - '타이밍 조정': 예고(채워짐)에 맞춰 노트를 치면 반응 지연을 자동 측정해
 ///                  engine.previewOffset(예고 오프셋)을 PlayerPrefs에 저장한다.
 /// - 점수: 채보 노트 수와 무관하게 MAX_SCORE(만점)로 정규화해 표시.
@@ -20,6 +19,15 @@ public class GameScreen : MonoBehaviour
 {
     [Header("Core")]
     public GameEngine engine;
+
+    [Header("Presentation / Debug")]
+    [Tooltip("시각 버전. 꺼짐(기본): 텍스트는 Console로 출력하고 파란 타격 효과를 숨깁니다. 켜짐: 텍스트 UI와 파란 효과를 표시합니다. 노트 예고와 Auto 표시는 항상 유지합니다.")]
+    public bool visualVersion = false;
+    private readonly GameTextOutput textOutput = new();
+    private bool appliedVisualVersion;
+    private bool menuBackgroundVisible = true;
+    private string menuMessage = "";
+    private AutoPlayIndicator autoIndicator;
 
     [Header("Result (곡 종료 결과창)")]
     public ResultScreen resultScreen;
@@ -59,11 +67,12 @@ public class GameScreen : MonoBehaviour
     // ── 판정 개수 집계 ────────────────────────────────────────────────────────
     private int perfectCount, goodCount, missCount;
 
-    // ── 2key 키 배치 (D / K) ──────────────────────────────────────────────────
-    private static readonly KeyCode[] Keys2 = { KeyCode.D, KeyCode.K };
-    private KeyCode[] activeKeys = Keys2;
+    private RhythmTestMode activeMode;
+    private string InputHint => RhythmTestModes.InputHint(activeMode);
+    private bool IsLaneKeyDown(int lane) => RhythmTestModes.IsLaneKeyDown(activeMode, lane);
 
     private bool inMenu = true;
+    private int menuInputAfterFrame = -1;
     private float judgmentTimer;
 
     // ── 타이밍 조정 상태 ──────────────────────────────────────────────────────
@@ -71,9 +80,10 @@ public class GameScreen : MonoBehaviour
     private bool calibFinalizing;
     private readonly List<float> calibSamples = new();
     private const int CALIB_INTERVAL_BEATS = 24;    // 채보에 넣을 노트 수
-    private const float CALIB_INTERVAL = 0.5f;  // 노트 간격(초) = 120BPM
     private const float CALIB_FIRST = 1.0f;  // 첫 노트 시각(초)
-    private const float CALIB_PREVIEW = 0.5f;  // 예고 시간(초)
+    private float CalibrationInterval => RhythmTestModes.CalibrationInterval(activeMode);
+    private float previewBeforeCalibration;
+    private AudioClip calibrationClip;
     private const int CALIB_TARGET = 16;    // 목표 표본 수(모이면 종료)
     private const int CALIB_MIN = 4;     // 유효 최소 표본 수
 
@@ -83,10 +93,17 @@ public class GameScreen : MonoBehaviour
     {
         if (engine != null)
         {
+            activeMode = engine.testMode;
             engine.OnJudge += HandleJudge;
             engine.OnFinished += HandleFinished;
         }
+        if (resultScreen != null) resultScreen.MenuRequested += ReturnToMenu;
         if (menuRoot != null) menuBg = menuRoot.GetComponent<UnityEngine.UI.Image>();
+        var canvas = engine != null && engine.display != null
+            ? engine.display.GetComponentInParent<Canvas>()
+            : menuText != null ? menuText.GetComponentInParent<Canvas>() : null;
+        if (canvas != null) autoIndicator = AutoPlayIndicator.Create(canvas.rootCanvas);
+        ApplyPresentationMode();
         ShowMenu();
     }
 
@@ -104,11 +121,48 @@ public class GameScreen : MonoBehaviour
     /// <summary>검정 배경만 켜고 끈다(타이밍 조정 중엔 꺼서 노트가 보이게).</summary>
     void SetMenuBackground(bool on)
     {
-        if (menuBg != null) menuBg.enabled = on;
+        menuBackgroundVisible = on;
+        if (menuBg != null) menuBg.enabled = on && visualVersion;
+    }
+
+    // 표시와 게임 동작의 모드 설정은 여기서 함께 적용한다.
+    // 향후 디버깅 전용 동작도 이 경로에 연결할 수 있다.
+    void ApplyPresentationMode()
+    {
+        var overlays = new List<UnityEngine.UI.Graphic>();
+        if (menuBg != null) overlays.Add(menuBg);
+        if (resultScreen != null)
+        {
+            var root = resultScreen.panelRoot != null ? resultScreen.panelRoot : resultScreen.gameObject;
+            overlays.AddRange(root.GetComponentsInChildren<UnityEngine.UI.Graphic>(true));
+            resultScreen.TextOutput = textOutput;
+        }
+        textOutput.SetMode(!visualVersion, this, overlays);
+        if (engine != null) engine.SetVisualVersion(visualVersion);
+        appliedVisualVersion = visualVersion;
+        SetMenuBackground(menuBackgroundVisible);
+        if (inMenu || calibrating) textOutput.Write("Menu", menuText, menuMessage);
+        if (scoreText) textOutput.Write("Score", scoreText, scoreText.text);
+        if (comboText) textOutput.Write("Combo", comboText, comboText.text);
+        if (judgmentText) textOutput.Write("Judge", judgmentText, judgmentText.text);
+        if (resultScreen != null) resultScreen.RefreshPresentation();
+        var managed = new HashSet<TMP_Text> { menuText, scoreText, comboText, judgmentText };
+        if (resultScreen != null) { managed.Add(resultScreen.titleText); managed.Add(resultScreen.bodyText); }
+        textOutput.PublishOtherText(this, managed);
+    }
+
+    void WriteMenu(string message)
+    {
+        menuMessage = message;
+        textOutput.Write("Menu", menuText, message);
     }
 
     void OnDestroy()
     {
+        if (autoIndicator != null) Destroy(autoIndicator.gameObject);
+        textOutput.RestoreVisibility();
+        if (resultScreen != null) resultScreen.MenuRequested -= ReturnToMenu;
+        if (calibrationClip != null) Destroy(calibrationClip);
         if (engine != null)
         {
             engine.OnJudge -= HandleJudge;
@@ -118,12 +172,13 @@ public class GameScreen : MonoBehaviour
 
     // ── 채보 존재 확인 ────────────────────────────────────────────────────────
 
-    /// <summary>2key 채보 리소스명을 조용히 찾는다(없으면 null).</summary>
-    static string ResolveChart(string baseName)
+    /// <summary>선택한 모드의 채보만 로드한다. Easy/Single은 Classic으로 대체하지 않는다.</summary>
+    string ResolveChart(string baseName)
     {
-        string primary = baseName + "_2k";
+        string primary = baseName + RhythmTestModes.ChartSuffix(activeMode);
         if (Resources.Load<TextAsset>($"Songs/{primary}") != null) return primary;
-        if (Resources.Load<TextAsset>($"Songs/{baseName}") != null) return baseName; // 폴백
+        if (RhythmTestModes.AllowLegacyChartFallback(activeMode)
+            && Resources.Load<TextAsset>($"Songs/{baseName}") != null) return baseName;
         return null;
     }
 
@@ -137,24 +192,19 @@ public class GameScreen : MonoBehaviour
         SetMenuActive(true);        // 메뉴 전체(검정 배경 포함) 켜기
         SetMenuBackground(true);    // 배경도 다시 켜기(타이밍 조정에서 꺼졌을 수 있음)
 
-        if (!menuText)
-        {
-            if (!string.IsNullOrEmpty(notice)) Debug.LogWarning($"[GameScreen] {notice}");
-            return;
-        }
-
         string avail = ResolveChart(songResourceName) != null ? "" : "   (채보 없음)";
-        string offStr = OffsetLabel(PlayerPrefs.GetFloat(GameEngine.PrefKeyPreviewOffset, 0f));
+        string offStr = OffsetLabel(PlayerPrefs.GetFloat(engine.OffsetPreferenceKey, 0f));
         string head = string.IsNullOrEmpty(notice) ? "" : $"<color=#ff6666>{notice}</color>\n\n";
 
-        menuText.gameObject.SetActive(true);
-        menuText.text =
+        if (menuText) menuText.gameObject.SetActive(true);
+        WriteMenu(
             head +
-            "RHYTHM GAME (2-Key)\n\n" +
+            $"RHYTHM GAME ({engine.LaneCount}-Key) · {activeMode}\n\n" +
             $"곡: {songResourceName}{avail}\n\n" +
-            "[Enter] 게임 시작    (D / K)\n" +
-            "[C] 타이밍 조정\n\n" +
-            $"현재 예고 보정: {offStr}";
+            $"[Enter] 게임 시작    ({InputHint})\n" +
+            "[C] 타이밍 조정\n" +
+            $"[F2] AUTO: {(engine.AutoPlayEnabled ? "ON" : "OFF")}\n\n" +
+            $"현재 예고 보정: {offStr}");
     }
 
     static string OffsetLabel(float sec)
@@ -165,18 +215,33 @@ public class GameScreen : MonoBehaviour
 
     // ── 일반 플레이 시작 ──────────────────────────────────────────────────────
 
+    /// <summary>시작 메뉴의 F2 또는 UI Button에서 호출할 수 있다.</summary>
+    public void ToggleAutoPlay()
+    {
+        if (engine == null || !inMenu || (resultScreen != null && resultScreen.IsShowing)) return;
+        engine.SetAutoPlay(!engine.AutoPlayEnabled);
+        ShowMenu();
+    }
+
+    void LateUpdate()
+    {
+        if (autoIndicator != null)
+            autoIndicator.gameObject.SetActive(engine != null && engine.IsAutoPlayActive);
+    }
+
     public void SelectPlay()
     {
         string chart = ResolveChart(songResourceName);
-        if (chart == null) { ShowMenu($"'{songResourceName}'의 2-Key 채보를 찾을 수 없습니다."); return; }
+        if (chart == null) { ShowMenu($"'{songResourceName}'의 {activeMode} 채보를 찾을 수 없습니다."); return; }
 
         SongData song = SongLoader.LoadFromResources(chart);
         if (song == null || string.IsNullOrEmpty(song.source))
         { ShowMenu($"'{chart}.json' 로드 실패 — source 필드를 확인하세요."); return; }
 
-        ResetCounters(song);
         engine.LoadSong(song);
+        ResetCounters(song);
         engine.StartGame(countdownSeconds);
+        if (!engine.IsRunning) { ShowMenu("오디오를 재생할 수 없습니다."); return; }
 
         inMenu = false;
         SetMenuActive(false);   // 게임 시작 → 메뉴(검정 배경 + 텍스트) 통째로 숨김
@@ -194,35 +259,47 @@ public class GameScreen : MonoBehaviour
 
     void Update()
     {
+        if (engine == null) return;
+        if (appliedVisualVersion != visualVersion) ApplyPresentationMode();
+        if (activeMode != engine.testMode)
+        {
+            ReturnToMenu();
+            return;
+        }
         // 결과창 표시 중이면 입력은 ResultScreen이 처리 → 여기선 아무 것도 안 함
         if (resultScreen != null && resultScreen.IsShowing) return;
 
         if (inMenu)
         {
+            // 결과창을 닫은 Space/Enter가 같은 프레임에 게임까지 시작하지 않도록 한다.
+            if (Time.frameCount <= menuInputAfterFrame) return;
             if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)
                 || Input.GetKeyDown(KeyCode.Space))
                 SelectPlay();
             else if (Input.GetKeyDown(KeyCode.C))
                 StartCalibration();
+            else if (Input.GetKeyDown(KeyCode.F2))
+                ToggleAutoPlay();
             return;
         }
 
-        // ESC → 메뉴로 (씬 리로드)
-        if (Input.GetKeyDown(KeyCode.Escape)) { ReloadScene(); return; }
+        if (Input.GetKeyDown(KeyCode.Escape)) { ReturnToMenu(); return; }
 
         if (calibrating) { UpdateCalibration(); return; }
 
         // ── 일반 플레이 ──
-        if (scoreText) scoreText.text = $"SCORE\n{normalizedScore:D7}";
-        if (comboText) comboText.text = engine.Combo > 1 ? $"{engine.Combo} COMBO" : "";
-        if (judgmentText && judgmentTimer > 0f)
+        textOutput.Write("Score", scoreText, $"SCORE\n{normalizedScore:D7}");
+        textOutput.Write("Combo", comboText, engine.Combo > 1 ? $"{engine.Combo} COMBO" : "");
+        if (judgmentTimer > 0f)
         {
             judgmentTimer -= Time.deltaTime;
-            if (judgmentTimer <= 0f) judgmentText.text = "";
+            if (judgmentTimer <= 0f) textOutput.Write("Judge", judgmentText, "");
         }
 
-        for (int i = 0; i < activeKeys.Length && i < engine.LaneCount; i++)
-            if (Input.GetKeyDown(activeKeys[i])) HandleTap(i);
+        // 오토는 노트 입력만 무시한다. 위의 메뉴/취소 입력 처리는 그대로 둔다.
+        if (!engine.IsAutoPlayActive)
+            for (int i = 0; i < engine.LaneCount; i++)
+                if (IsLaneKeyDown(i)) HandleTap(i);
     }
 
     void HandleTap(int lane)
@@ -278,9 +355,8 @@ public class GameScreen : MonoBehaviour
 
     void ShowJudgment(string text, Color color)
     {
-        if (!judgmentText) return;
-        judgmentText.text = text;
-        judgmentText.color = color;
+        textOutput.Write("Judge", judgmentText, text, true);
+        if (judgmentText) judgmentText.color = color;
         judgmentTimer = 0.5f;
     }
 
@@ -288,6 +364,7 @@ public class GameScreen : MonoBehaviour
 
     void StartCalibration()
     {
+        previewBeforeCalibration = engine.previewWindow;
         calibrating = true;
         calibFinalizing = false;
         inMenu = false;
@@ -297,20 +374,17 @@ public class GameScreen : MonoBehaviour
         engine.previewOffset = 0f;
 
         SongData chart = BuildCalibrationChart();
-        engine.LoadSong(chart);
-        engine.previewWindow = CALIB_PREVIEW;   // 예고 시간 고정
+        engine.LoadSong(chart, forCalibration: true);
+        // Classic의 기존 보정 방식은 유지. 새 모드는 실제 플레이 예고 시간을 사용.
+        engine.previewWindow = RhythmTestModes.CalibrationPreview(activeMode, previewBeforeCalibration);
 
-        AudioClip silent = BuildSilentClip(CALIB_FIRST + CALIB_INTERVAL_BEATS * CALIB_INTERVAL + 2f);
-        engine.StartGameWithClip(silent, countdownSeconds);
+        calibrationClip = BuildSilentClip(CALIB_FIRST + CALIB_INTERVAL_BEATS * CalibrationInterval + 2f);
+        engine.StartGameWithClip(calibrationClip, countdownSeconds);
 
         // 타이밍 조정 중엔 뒤의 노트(채워짐)를 봐야 하므로 검정 배경은 끄고 텍스트만 남긴다.
         SetMenuActive(true);
         SetMenuBackground(false);
-        if (menuText)
-        {
-            menuText.gameObject.SetActive(true);
-            RenderCalibText();
-        }
+        RenderCalibText();
     }
 
     void UpdateCalibration()
@@ -318,36 +392,39 @@ public class GameScreen : MonoBehaviour
         if (calibFinalizing) return;   // 종료 메시지 표시 중 → 입력 무시
 
         // 예고(채워짐)에 맞춰 노트를 치면 부호 있는 오차를 표본으로 수집
-        for (int i = 0; i < activeKeys.Length && i < engine.LaneCount; i++)
+        for (int i = 0; i < engine.LaneCount; i++)
         {
-            if (!Input.GetKeyDown(activeKeys[i])) continue;
-            if (SfxPlayer.Instance != null) SfxPlayer.Instance.PlayClap();
-
-            if (engine.TryMeasureTap(i, out float err))
-            {
-                calibSamples.Add(err);
-                RenderCalibText();
-                if (calibSamples.Count >= CALIB_TARGET) { FinalizeCalibration(); return; }
-            }
+            if (!IsLaneKeyDown(i)) continue;
+            RecordCalibrationTap(i);
+            if (calibFinalizing) return;
         }
+    }
+
+    void RecordCalibrationTap(int lane)
+    {
+        if (!calibrating || calibFinalizing) return;
+        if (SfxPlayer.Instance != null) SfxPlayer.Instance.PlayClap();
+        if (!engine.TryMeasureTap(lane, out float error)) return;
+        calibSamples.Add(error);
+        RenderCalibText();
+        if (calibSamples.Count >= CALIB_TARGET) FinalizeCalibration();
     }
 
     void RenderCalibText()
     {
-        if (!menuText) return;
-        menuText.gameObject.SetActive(true);
-        menuText.text =
+        if (menuText) menuText.gameObject.SetActive(true);
+        WriteMenu(
             "타이밍 조정\n\n" +
             "버튼 안이 가득 찰 때 맞춰\n" +
-            "D / K 를 리듬에 맞게 두드리세요.\n\n" +
+            $"{InputHint} 를 리듬에 맞게 두드리세요.\n\n" +
             $"입력: {calibSamples.Count} / {CALIB_TARGET}\n\n" +
-            "ESC : 취소";
+            "ESC : 취소");
     }
 
     void FinalizeCalibration()
     {
         if (!calibrating || calibFinalizing) return;
-        calibFinalizing = true;      // calibrating 은 리로드까지 true로 유지(집계 차단)
+        calibFinalizing = true;      // 메뉴 복귀까지 집계 차단
         engine.Halt();               // 노트 진행 정지(잔여 miss 깜빡임 방지)
 
         if (calibSamples.Count < CALIB_MIN)
@@ -357,7 +434,7 @@ public class GameScreen : MonoBehaviour
         }
 
         float offset = Mathf.Clamp(Median(calibSamples), -0.2f, 0.2f);
-        PlayerPrefs.SetFloat(GameEngine.PrefKeyPreviewOffset, offset);
+        PlayerPrefs.SetFloat(engine.OffsetPreferenceKey, offset);
         PlayerPrefs.Save();
 
         StartCoroutine(CalibDoneThenMenu(
@@ -369,14 +446,11 @@ public class GameScreen : MonoBehaviour
     {
         SetMenuActive(true);
         SetMenuBackground(true);   // 완료 메시지를 잘 보이게 배경 복원
-        if (menuText)
-        {
-            menuText.gameObject.SetActive(true);
-            menuText.text = (success ? "" : "<color=#ff6666>") + msg + (success ? "" : "</color>");
-        }
+        if (menuText) menuText.gameObject.SetActive(true);
+        WriteMenu((success ? "" : "<color=#ff6666>") + msg + (success ? "" : "</color>"));
         if (AudioManager.Instance != null) AudioManager.Instance.Stop();
         yield return new WaitForSecondsRealtime(1.4f);
-        ReloadScene();   // 저장된 오프셋은 리로드 후 GameEngine.Awake에서 다시 로드됨
+        ReturnToMenu();
     }
 
     static float Median(List<float> values)
@@ -387,22 +461,22 @@ public class GameScreen : MonoBehaviour
         return (n % 2 == 1) ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2]);
     }
 
-    /// <summary>일정 간격의 2key 조정용 채보를 코드로 생성.</summary>
-    static SongData BuildCalibrationChart()
+    /// <summary>현재 모드의 레인 수와 속도에 맞는 보정 채보.</summary>
+    SongData BuildCalibrationChart()
     {
         var song = new SongData
         {
             source = "",                 // 오디오는 무음 클립으로 대체
             difficulty = "calibration",
-            meta = new SongMeta { bpm = 120f, seconds_per_beat = CALIB_INTERVAL },
+            meta = new SongMeta { bpm = 60f / CalibrationInterval, seconds_per_beat = CalibrationInterval },
             notes = new List<NoteData>(),
         };
         for (int i = 0; i < CALIB_INTERVAL_BEATS; i++)
         {
             song.notes.Add(new NoteData
             {
-                time = CALIB_FIRST + i * CALIB_INTERVAL,
-                lane = i % 2,               // 0(D) / 1(K) 번갈아 — 이미 0-based
+                time = CALIB_FIRST + i * CalibrationInterval,
+                lane = i % engine.LaneCount, // 이미 0-based. Single은 모두 0.
             });
         }
         return song;
@@ -418,9 +492,24 @@ public class GameScreen : MonoBehaviour
 
     // ── 공통 ──────────────────────────────────────────────────────────────────
 
-    void ReloadScene()
+    public void ReturnToMenu()
     {
+        StopAllCoroutines();
         if (AudioManager.Instance != null) AudioManager.Instance.Stop();
-        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        if (calibrating) engine.previewWindow = previewBeforeCalibration;
+        if (calibrationClip != null) Destroy(calibrationClip);
+        calibrationClip = null;
+        engine.ResetForMenu();
+        activeMode = engine.testMode;
+        menuInputAfterFrame = Time.frameCount;
+        calibFinalizing = false;
+        judgmentTimer = 0f;
+        calibSamples.Clear();
+        ResetCounters(null);
+        textOutput.Write("Score", scoreText, "SCORE\n0000000");
+        textOutput.Write("Combo", comboText, "");
+        textOutput.Write("Judge", judgmentText, "");
+        if (resultScreen != null) resultScreen.Hide();
+        ShowMenu();
     }
 }

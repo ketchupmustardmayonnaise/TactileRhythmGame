@@ -2,6 +2,8 @@ public class ActiveNote
 {
     public NoteData data;
     public bool isHit;
+    // 예고만 지운 보정 노트도 이후 측정은 가능하다.
+    public bool previewDismissed;
 
     public ActiveNote(NoteData data)
     {

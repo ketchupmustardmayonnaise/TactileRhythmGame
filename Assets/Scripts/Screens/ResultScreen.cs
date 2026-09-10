@@ -5,7 +5,7 @@ using TMPro;
 /// <summary>
 /// 곡 종료 후 결과 창.
 /// 최종 점수 / Perfect·Good·Miss 개수 / 가장 길게 이어진 콤보(Max Combo)를 표시하고,
-/// 아무 키(또는 마우스/터치)나 누르면 씬을 리로드해 최초 메뉴로 돌아간다.
+/// 아무 키(또는 마우스/터치)나 누르면 선택한 테스트 모드를 유지하고 메뉴로 돌아간다.
 ///
 /// ── 에디터 설정 (Canvas 안에 만든다) ──────────────────────────────────────
 ///  1) Hierarchy에서 Canvas > 우클릭 > Create Empty, 이름을 "ResultPanel" 로.
@@ -27,6 +27,9 @@ using TMPro;
 /// </summary>
 public class ResultScreen : MonoBehaviour
 {
+    public event System.Action MenuRequested;
+    public GameTextOutput TextOutput { get; set; }
+    private string resultBody = "";
     [Header("Refs")]
     [Tooltip("결과창 전체 루트. 켜고 끄는 대상. 비우면 이 스크립트가 붙은 오브젝트를 사용")]
     public GameObject panelRoot;
@@ -50,7 +53,8 @@ public class ResultScreen : MonoBehaviour
     void Awake()
     {
         if (panelRoot == null) panelRoot = gameObject;
-        panelRoot.SetActive(false);
+        // 비활성 상태에서 처음 Show를 호출하면 SetActive 중 Awake가 실행될 수 있다.
+        panelRoot.SetActive(showing);
     }
 
     /// <summary>결과를 표시한다. GameScreen이 곡 종료 시 호출.</summary>
@@ -58,21 +62,40 @@ public class ResultScreen : MonoBehaviour
     {
         showing = true;
         shownAt = Time.unscaledTime;
+        if (panelRoot == null) panelRoot = gameObject;
         panelRoot.SetActive(true);
-
-        if (titleText != null) titleText.text = "RESULT";
-
-        string title = titleText != null ? "" : "RESULT\n\n";
-        if (bodyText != null)
-        {
-            bodyText.text =
-                title +
+        resultBody =
                 $"SCORE   {score:D7}\n\n" +
                 $"<color=#66FFFF>PERFECT</color>   {perfect}\n" +
                 $"<color=#FFE066>GOOD</color>      {good}\n" +
                 $"<color=#FF6666>MISS</color>      {miss}\n\n" +
                 $"MAX COMBO   {maxCombo}\n\n" +
                 "<size=70%>아무 키나 누르면 메뉴로</size>";
+        RefreshPresentation();
+    }
+
+    public void RefreshPresentation()
+    {
+        if (!showing) return;
+        if (TextOutput != null)
+        {
+            if (TextOutput.ConsoleOnly)
+            {
+                TextOutput.Write("Result", null, "RESULT\n\n" + resultBody);
+                // 콘솔에서 UI로 전환해도 최신 결과를 표시한다.
+                if (titleText) titleText.text = "RESULT";
+                if (bodyText) bodyText.text = (titleText ? "" : "RESULT\n\n") + resultBody;
+            }
+            else
+            {
+                TextOutput.Write("ResultTitle", titleText, "RESULT");
+                TextOutput.Write("Result", bodyText, (titleText ? "" : "RESULT\n\n") + resultBody);
+            }
+        }
+        else
+        {
+            if (titleText) titleText.text = "RESULT";
+            if (bodyText) bodyText.text = (titleText ? "" : "RESULT\n\n") + resultBody;
         }
     }
 
@@ -81,15 +104,26 @@ public class ResultScreen : MonoBehaviour
         if (!showing) return;
         if (Time.unscaledTime - shownAt < inputLockSeconds) return;
 
-        // 아무 키/마우스/터치 → 최초 메뉴로 (씬 리로드)
+        // 아무 키/마우스/터치 → 메뉴로
         if (Input.anyKeyDown || Input.touchCount > 0)
             ReturnToMenu();
     }
 
     void ReturnToMenu()
     {
+        if (MenuRequested != null)
+        {
+            MenuRequested.Invoke();
+            return;
+        }
         showing = false;
         if (AudioManager.Instance != null) AudioManager.Instance.Stop();
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    public void Hide()
+    {
+        showing = false;
+        if (panelRoot != null) panelRoot.SetActive(false);
     }
 }
