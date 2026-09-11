@@ -1,0 +1,158 @@
+{
+  "source": "little_snowman.mp3",
+  "difficulty": "easy",
+  "meta": {
+    "bpm": 0.0,
+    "seconds_per_beat": 0.3,
+    "test_mode": "easy",
+    "keys": 2,
+    "min_gap_seconds": 1.25,
+    "source_note_count": 70
+  },
+  "notes": [
+    {
+      "time": 1.465,
+      "lane": 2
+    },
+    {
+      "time": 4.009,
+      "lane": 2
+    },
+    {
+      "time": 5.44,
+      "lane": 1
+    },
+    {
+      "time": 8.029,
+      "lane": 1
+    },
+    {
+      "time": 9.371,
+      "lane": 1
+    },
+    {
+      "time": 10.675,
+      "lane": 2
+    },
+    {
+      "time": 12.016,
+      "lane": 2
+    },
+    {
+      "time": 13.31,
+      "lane": 1
+    },
+    {
+      "time": 14.602,
+      "lane": 1
+    },
+    {
+      "time": 15.966,
+      "lane": 2
+    },
+    {
+      "time": 17.239,
+      "lane": 1
+    },
+    {
+      "time": 18.616,
+      "lane": 2
+    },
+    {
+      "time": 19.901,
+      "lane": 2
+    },
+    {
+      "time": 21.224,
+      "lane": 1
+    },
+    {
+      "time": 22.547,
+      "lane": 2
+    },
+    {
+      "time": 23.887,
+      "lane": 1
+    },
+    {
+      "time": 25.177,
+      "lane": 2
+    },
+    {
+      "time": 26.541,
+      "lane": 1
+    },
+    {
+      "time": 27.802,
+      "lane": 1
+    },
+    {
+      "time": 29.136,
+      "lane": 2
+    },
+    {
+      "time": 30.431,
+      "lane": 2
+    },
+    {
+      "time": 31.721,
+      "lane": 1
+    },
+    {
+      "time": 33.042,
+      "lane": 2
+    },
+    {
+      "time": 34.47,
+      "lane": 1
+    },
+    {
+      "time": 35.729,
+      "lane": 1
+    },
+    {
+      "time": 37.031,
+      "lane": 2
+    },
+    {
+      "time": 38.367,
+      "lane": 2
+    },
+    {
+      "time": 39.691,
+      "lane": 1
+    },
+    {
+      "time": 41.014,
+      "lane": 1
+    },
+    {
+      "time": 42.379,
+      "lane": 2
+    },
+    {
+      "time": 43.637,
+      "lane": 2
+    },
+    {
+      "time": 44.961,
+      "lane": 1
+    },
+    {
+      "time": 46.274,
+      "lane": 2
+    },
+    {
+      "time": 47.655,
+      "lane": 1
+    },
+    {
+      "time": 48.975,
+      "lane": 1
+    },
+    {
+      "time": 50.311,
+      "lane": 1
+    }
+  ]
+}

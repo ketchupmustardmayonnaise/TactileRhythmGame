@@ -11,6 +11,9 @@
 /[Oo]bj/
 /[Bb]uild/
 /[Bb]uilds/
+# Local build output for the external braille capture tool.
+# Obtain capture.exe separately when testing on the device.
+/Tools/BrailleCaptureBuild/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
 *.log
@@ -109,3 +112,4 @@ InitTestScene*.unity*
 Python/**/*.json
 Python/**/*.mp3
 Python/.idea/
+Python/__pycache__/

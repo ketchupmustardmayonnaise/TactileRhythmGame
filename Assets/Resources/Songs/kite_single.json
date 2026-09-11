@@ -1,0 +1,90 @@
+{
+  "source": "kite.mp3",
+  "difficulty": "single",
+  "meta": {
+    "bpm": 99.384,
+    "seconds_per_beat": 0.3,
+    "test_mode": "single",
+    "keys": 1,
+    "min_gap_seconds": 1.25,
+    "source_note_count": 36
+  },
+  "notes": [
+    {
+      "time": 0.058,
+      "lane": 1
+    },
+    {
+      "time": 2.4729,
+      "lane": 1
+    },
+    {
+      "time": 4.8762,
+      "lane": 1
+    },
+    {
+      "time": 7.2795,
+      "lane": 1
+    },
+    {
+      "time": 9.0674,
+      "lane": 1
+    },
+    {
+      "time": 10.8669,
+      "lane": 1
+    },
+    {
+      "time": 13.2702,
+      "lane": 1
+    },
+    {
+      "time": 15.3774,
+      "lane": 1
+    },
+    {
+      "time": 17.177,
+      "lane": 1
+    },
+    {
+      "time": 19.2726,
+      "lane": 1
+    },
+    {
+      "time": 21.6642,
+      "lane": 1
+    },
+    {
+      "time": 24.0675,
+      "lane": 1
+    },
+    {
+      "time": 26.4707,
+      "lane": 1
+    },
+    {
+      "time": 28.2703,
+      "lane": 1
+    },
+    {
+      "time": 30.0466,
+      "lane": 1
+    },
+    {
+      "time": 32.4731,
+      "lane": 1
+    },
+    {
+      "time": 34.0114,
+      "lane": 1
+    },
+    {
+      "time": 36.0722,
+      "lane": 1
+    },
+    {
+      "time": 37.8717,
+      "lane": 1
+    }
+  ]
+}

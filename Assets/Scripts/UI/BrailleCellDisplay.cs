@@ -20,7 +20,7 @@ public class BrailleCellDisplay : MonoBehaviour
 
     [Header("Dot 크기 비율 (0~1)")]
     [Range(0.3f, 0.95f)]
-    public float dotFillRatio = 0.7f;
+    public float dotFillRatio = 0.77f;
 
     [Header("Colors")]
     public Color activeColor     = new Color(0.95f, 0.95f, 0.95f);
@@ -34,6 +34,7 @@ public class BrailleCellDisplay : MonoBehaviour
 
     /// <summary>GameEngine이 설정. 터치 시 버튼 단위 하이라이트에 사용.</summary>
     [HideInInspector] public BrailleCircleButton[] buttons;
+    public bool AllowTouchHighlight { get; set; } = true;
 
     private BrailleCell[,] cells;
     private Canvas          _canvas;
@@ -143,6 +144,12 @@ public class BrailleCellDisplay : MonoBehaviour
 
     public void Refresh() { }
 
+    public void ClearHighlights()
+    {
+        if (cells == null) return;
+        foreach (var cell in cells) cell?.SetHighlight(false);
+    }
+
     // cells 배열의 실제 크기로 검사 — dotRows/dotColumns와 배열이 잠깐 어긋날 때 방어
     bool InBounds(int row, int col) =>
         cells != null &&
@@ -153,7 +160,7 @@ public class BrailleCellDisplay : MonoBehaviour
 
     void LateUpdate()
     {
-        if (cells == null) return;
+        if (cells == null || !AllowTouchHighlight) return;
 
         Camera uiCam = _canvas != null ? _canvas.worldCamera : null;
 
