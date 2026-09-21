@@ -1,0 +1,91 @@
+[workspace]
+resolver = "3"
+members = [
+    "applets/*",
+    "audio-service",
+    "extensions/braille", 
+    "extensions/widget",
+    "extensions/i18n",
+    "extensions/graphics",
+    "extensions/physics",
+    "extensions/views",
+    "host-utils",
+    "pc-apps/capture",
+    "protocols",
+    "runtime-common",
+    "runtime-native",
+    "runtime-web",
+    "sdk",
+    "tools/applet-metadata-tool",
+]
+exclude = [
+    "firmware",
+]
+
+[workspace.dependencies]
+anyhow = "1.0.102"
+axum = "0.8.9"
+base64 = "0.22.1"
+bitflags = "2.11.1"
+braille = { path = "extensions/braille" }
+bytes = "1.11.1"
+clap = { version = "4.6.0", features = ["derive"] }
+widget = { path = "extensions/widget" }
+i18n = { path = "extensions/i18n" }
+config = "0.15"
+console_error_panic_hook = "0.1.7"
+cpal = { git = "https://github.com/RustAudio/cpal", features = ["pipewire"] }
+crossbeam-channel = "0.5.15"
+crossterm = "0.29.0"
+directories = "6.0"
+dotenvy = "0.15.7"
+eframe = { version = "0.34.2", default-features = false, features = ["glow", "persistence", "x11", "wayland"] }
+egui = "0.34.2"
+embedded-graphics = "0.8.2"
+futures-util = "0.3.32"
+get_if_addrs = "0.5.3"
+getrandom = { version = "0.4.2", features = ["wasm_js"] }
+graphics = { path = "extensions/graphics"}
+host-utils = { path = "host-utils" }
+image = "0.25.10"
+imageproc = "0.26.2"
+indexmap = { version = "2.13.1", default-features = false, features = ["serde"] }
+js-sys = "0.3.98"
+leptos = "0.8.19"
+leptos_meta = "0.8.6"
+leptos_router = "0.8.12"
+libm = "0.2.16"
+log = "0.4.29"
+once_cell = "1.21.4"
+parking_lot = "0.12.5"
+physics = { path = "extensions/physics" }
+pitch_shift = "2.1.0"
+postcard = { version = "1.1.3", features = ["alloc", "experimental-derive"] }
+protocols = { path = "protocols" }
+reqwest = { version = "0.13.3", features = ["json"] }
+rodio = { version = "0.22.2", features = ["symphonia-mp3"] }
+runtime-common = { path = "runtime-common" }
+rusttype = "0.9.3"
+sdk = { path = "sdk" }
+serde = { version = "1.0.228", default-features = false, features = ["alloc", "derive"] }
+serde_json = "1.0.149"
+serialport = "4.9.0"
+thiserror = "2.0.18"
+time = { version = "0.3.47", features = ["local-offset"] }
+tinyvec = { version = "1.11.0", features = ["alloc"] }
+tokio = { version = "1.52.3", features = ["full"] }
+tokio-serial = "5.4.5"
+tokio-stream = "0.1.18"
+tokio-tungstenite = "0.29.0"
+toml = "1.1.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+typed-builder = "0.23.2"
+usb-protocol = { version = "0.1.0", path = "pc-apps/usb-protocol" }
+views = { path = "extensions/views" }
+wasm-bindgen = "0.2.121"
+wasm-bindgen-futures = "0.4.58"
+wasm-metadata = "0.248.0"
+wasmtime = "44.0.1"
+web-sys = "0.3.98"
+xcap = "0.9.3"

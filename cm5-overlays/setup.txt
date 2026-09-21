@@ -1,0 +1,69 @@
+# 사용자
+
+user: muon
+
+copy cm4-overlay/
+
+/boot/firmware/cmdline.txt에서 console=serial0,115200  삭제
+
+sudo systemctl enable audio-service.service 
+sudo systemctl enable runtime-native.service
+
+sudo apt install git setserial libpipewire-0.3-dev
+
+just deploy-assets
+just deploy
+
+# bluetooth service 비활성화
+
+# wm8960 driver 설치
+
+git clone https://github.com/waveshare/WM8960-Audio-HAT
+git checkout 6.18.x
+cd WM8960-Audio-HAT
+sudo ./install.sh 
+sudo reboot
+
+%sudo ALL=(ALL:ALL) NOPASSWD: ALL
+
+
+----- CM5
+
+https://github.com/spookyfirehorse/wm8960-kernel-6.18
+
+user sevice
+./config/systemd/user/audio-service.service
+---------
+[Unit]
+Description=My Custom Audio User Service
+After=sound.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/sleep 3
+ExecStartPre=/usr/bin/amixer -c 0 sset 'Headphone' 115
+ExecStart=/home/muon/bin/audio-service
+Environment=TTS_ASSET_DIR=/home/muon/tts-engine/assets
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+--------
+
+$ systemctl --user daemon-reload
+$ systemctl --user enable audio-service.service
+$ systemctl --user start audio-service.service
+
+user start-service.service
+$ loginctl enable-linger muon
+
+----
+$ cat /etc/modules
+# /etc/modules is obsolete and has been replaced by /etc/modules-load.d/.
+# Please see modules-load.d(5) and modprobe.d(5) for details.
+#
+# Updating this file still works, but it is undocumented and unsupported.
+i2c-dev
+snd-soc-wm8960
+snd-soc-simple-card
+g_serial

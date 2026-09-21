@@ -1,0 +1,22 @@
+[package]
+name = "sdk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+# bitflags = { workspace = true, optional = true }
+log.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+getrandom.workspace = true
+postcard.workspace = true
+wasm-metadata.workspace = true
+config.workspace = true
+indexmap.workspace = true
+
+[features]
+default = []
+host = []

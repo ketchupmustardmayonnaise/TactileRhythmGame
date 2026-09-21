@@ -1,0 +1,30 @@
+priority = "Normal"
+hidden = false
+icon = """
+00000000000
+01111011110
+01001010010
+01111011110
+01001010010
+01111011110
+01001010010
+01111011110
+01111111110
+00000000000
+00000000000
+"""
+
+[category]
+ko = "점자책"
+en = "Braille Book"
+ja = "점자책"
+
+[name]
+ko = "국민 교육 헌장"
+en = "Charter of National Education"
+ja = "国民教育憲章"
+
+[description]
+ko = "점자책: 국민 교육 헌장을 BRF(Braille Ready Format) 형식으로 읽을 수 있는 애플릿입니다."
+en = "Braille Book: An applet to read the Charter of National Education in BRF braille format."
+ja = "점자책：国民教育憲章をBRF形式で読むことができるアプレットです。"

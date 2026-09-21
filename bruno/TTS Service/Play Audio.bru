@@ -1,0 +1,20 @@
+meta {
+  name: Play Audio
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{host}}/play
+  body: file
+  auth: inherit
+}
+
+body:file {
+  file: @file(/Users/mewlips/moredream/multiline-braille-display/runtime-common/assets/speak_error_dummy.mp3) @contentType(audio/mpeg)
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

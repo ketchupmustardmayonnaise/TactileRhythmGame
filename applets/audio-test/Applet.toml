@@ -1,0 +1,29 @@
+priority = "Normal"
+hidden = false
+icon = """
+00000000000
+00000100000
+00001100000
+00011100010
+01111100100
+01111100101
+01111100100
+00011100010
+00001100000
+00000100000
+00000000000
+"""
+
+[category]
+ko = "테스트"
+en = "Test"
+ja = "テスト"
+
+[name]
+ko = "오디오 테스트"
+en = "Audio Test"
+ja = "オーディオテスト"
+
+[description]
+ko = "오디오 기능 동작 및 재생을 테스트"
+en = "Test suites for audio features"

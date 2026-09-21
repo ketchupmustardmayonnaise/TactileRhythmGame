@@ -1,0 +1,30 @@
+priority = "Normal"
+hidden = false
+icon = """
+00000000000
+01010010100
+00000000000
+01010010100
+00000000000
+01010010100
+00000000000
+01010010100
+00000000000
+01010010100
+00000000000
+"""
+
+[category]
+ko = "테스트"
+en = "Test"
+ja = "テスト"
+
+[name]
+ko = "점자 테스트"
+en = "Braille Test"
+ja = "点字テスト"
+
+[description]
+ko = "2024 개정 점자 규정 braillify 라이브러리 검증 및 점자 변환 테스트"
+en = "Braille conversion test using 2024 revised braille rules and braillify library"
+ja = "점자 変換および braillify ライブラリの検証"

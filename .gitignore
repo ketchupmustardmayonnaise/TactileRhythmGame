@@ -1,0 +1,7 @@
+.DS_Store
+target/
+**/target/
+target-cross/
+
+dist/
+device-env.sh

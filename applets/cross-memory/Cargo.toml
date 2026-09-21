@@ -1,0 +1,13 @@
+[package]
+name = "cross-memory"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+braille.workspace = true
+graphics.workspace = true
+log.workspace = true
+sdk.workspace = true

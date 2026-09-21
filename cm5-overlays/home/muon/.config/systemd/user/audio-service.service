@@ -1,0 +1,16 @@
+[Unit]
+Description=DreamPad Audio Service
+After=sound.target pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/home/muon/bin/audio-service
+#Environment=TTS_ASSET_DIR=/home/muon/tts-engine/assets
+Environment=TTS_ASSET_DIR=/home/muon/audio-service/assets
+Environment=TTS_ENGINE=piper
+Environment=PIPER_ESPEAKNG_DATA_DIRECTORY=/usr/lib/aarch64-linux-gnu
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

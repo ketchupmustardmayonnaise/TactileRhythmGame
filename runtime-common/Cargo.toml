@@ -1,0 +1,17 @@
+[package]
+name = "runtime-common"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hex = "0.4.3"
+log.workspace = true
+reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+blake3 = "1.8.3"
+thiserror.workspace = true
+typed-builder.workspace = true
+crossbeam-channel.workspace = true
+sdk.workspace = true
+serde_json.workspace = true
+wasm-metadata.workspace = true

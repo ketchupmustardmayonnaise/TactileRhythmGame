@@ -1,0 +1,12 @@
+[package]
+name = "braille"
+version = "0.1.0"
+edition = "2024"
+description = "점자 입출력 관련 확장 라이브러리"
+
+[dependencies]
+sdk.workspace = true
+widget.workspace = true
+braillify = { git = "https://github.com/dev-five-git/braillify", default-features = false }
+
+

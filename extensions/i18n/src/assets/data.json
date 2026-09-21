@@ -1,0 +1,1667 @@
+{
+  "hash_002ea4a075370be3": {
+    "ko": "삼초",
+    "en": "three seconds",
+    "ja": "さんびょう"
+  },
+  "hash_02186ff93e68ae9d": {
+    "ko": "HTTP 응답 수신. 상태 코드",
+    "en": "HTTP response received. Status code ",
+    "ja": "HTTPレスポンス受信。ステータスコード "
+  },
+  "hash_033224de87a61e09": {
+    "ko": "사십이초",
+    "en": "forty-two seconds",
+    "ja": "よんじゅうにびょう"
+  },
+  "hash_05537e66db84cc78": {
+    "ko": "십",
+    "en": "Ten",
+    "ja": "じゅう"
+  },
+  "hash_055441b2a1ea1d9b": {
+    "ko": "십팔초",
+    "en": "eighteen seconds",
+    "ja": "じゅうはちびょう"
+  },
+  "hash_06a71b0e3fc187b5": {
+    "ko": "일반 상태 출력 테스트",
+    "en": "Normal status output test",
+    "ja": "一般状態出力テスト"
+  },
+  "hash_076b06f49c740bad": {
+    "ko": "이십팔초",
+    "en": "twenty-eight seconds",
+    "ja": "にじゅうはちびょう"
+  },
+  "hash_0a7eb70dcc5e71f8": {
+    "ko": "삼십삼초",
+    "en": "thirty-three seconds",
+    "ja": "さんじゅうさんびょう"
+  },
+  "hash_0b0f42c4b525da59": {
+    "ko": "삼십",
+    "en": "Thirty",
+    "ja": "さんじゅう"
+  },
+  "hash_0b6ca9fb2cd04fa7": {
+    "ko": "게임을 실행하시려면 가운데 키를 눌러주세요.",
+    "en": "Press the center key to start the game.",
+    "ja": "ゲームを実行するには、中央のキーを押してください。"
+  },
+  "hash_0d2bef6e756f0d50": {
+    "ko": "삼십이",
+    "en": "Thirty-two",
+    "ja": "さんじゅうに"
+  },
+  "hash_0f3b6af91b7dec01": {
+    "ko": "틀렸습니다. 다음 문항으로 진행하려면 가운데 키를 눌러주세요.",
+    "en": "Incorrect. Press Center key to proceed to the next question.",
+    "ja": "違います。次の問題に進むには中央キーを押してください。"
+  },
+  "hash_106f7def08052db8": {
+    "ko": "삼십사분",
+    "en": "Thirty-four",
+    "ja": "さんじゅうよんぷん"
+  },
+  "hash_115b2edc840fafc0": {
+    "ko": "미러링 시작",
+    "en": "Mirroring Started",
+    "ja": "ミラーリング開始"
+  },
+  "hash_120765c0f45af2ab": {
+    "ko": "사십구초",
+    "en": "forty-nine seconds",
+    "ja": "よんじゅうきゅうびょう"
+  },
+  "hash_1279c16431d2897b": {
+    "ko": "십삼초",
+    "en": "thirteen seconds",
+    "ja": "じゅうさんびょう"
+  },
+  "hash_14413941cb4f9b91": {
+    "ko": "한국어",
+    "en": "Korean",
+    "ja": "韓国語"
+  },
+  "hash_1602184f08481781": {
+    "ko": "사",
+    "en": "Four",
+    "ja": "よん"
+  },
+  "hash_1623cb9c6824c375": {
+    "ko": "사십삼",
+    "en": "Forty-three",
+    "ja": "よんじゅうさん"
+  },
+  "hash_17159287ad29e25f": {
+    "ko": "삼십이초",
+    "en": "thirty-two seconds",
+    "ja": "さんじゅうにびょう"
+  },
+  "hash_1715e2e5a612f3ab": {
+    "ko": "이십일",
+    "en": "Twenty-one",
+    "ja": "にじゅういち"
+  },
+  "hash_17b898b15f440349": {
+    "ko": "보통",
+    "en": "Normal",
+    "ja": "普通"
+  },
+  "hash_181bf29a4c01a792": {
+    "ko": "사십육분",
+    "en": "Forty-six",
+    "ja": "よんじゅうろっぷん"
+  },
+  "hash_185e7b61eb0c47b5": {
+    "ko": "오십분",
+    "en": "Fifty",
+    "ja": "ごじゅっぷん"
+  },
+  "hash_19193de90aa199a6": {
+    "ko": "이초",
+    "en": "two seconds",
+    "ja": "にびょう"
+  },
+  "hash_1a0d897ac022d8e4": {
+    "ko": "영초",
+    "en": "zero seconds",
+    "ja": "ゼロびょう"
+  },
+  "hash_1a8c6f22176dae32": {
+    "ko": "런처 앱을 시작합니다. 애플릿 목록을 가져오는데 실패했습니다",
+    "en": "Starting Launcher. Failed to load applet list.",
+    "ja": "ランチャーを開始します。アプレットリストの取得に失敗しました。"
+  },
+  "hash_1b89b0337544f8c2": {
+    "ko": "이십팔",
+    "en": "Twenty-eight",
+    "ja": "にじゅうはち"
+  },
+  "hash_1c5797277e268711": {
+    "ko": "팔",
+    "en": "Eight",
+    "ja": "はち"
+  },
+  "hash_1c9073bc2d2487e1": {
+    "ko": "십팔",
+    "en": "Eighteen",
+    "ja": "じゅうはち"
+  },
+  "hash_1ca409807de0224c": {
+    "ko": "이십육분",
+    "en": "Twenty-six",
+    "ja": "にじゅうろっぷん"
+  },
+  "hash_1d0861323211a1f7": {
+    "ko": "삼십칠",
+    "en": "Thirty-seven",
+    "ja": "さんじゅうなな"
+  },
+  "hash_1d5d82ebb0104ca2": {
+    "ko": "이십칠초",
+    "en": "twenty-seven seconds",
+    "ja": "にじゅうななびょう"
+  },
+  "hash_2101e4c43c08adbd": {
+    "ko": "이십분",
+    "en": "Twenty",
+    "ja": "にじゅっぷん"
+  },
+  "hash_21355595866631a2": {
+    "ko": "여성",
+    "en": "Female",
+    "ja": "女性"
+  },
+  "hash_220fa2ee492c77fb": {
+    "ko": "십오분",
+    "en": "Fifteen",
+    "ja": "じゅうごふん"
+  },
+  "hash_2328843c960311f0": {
+    "ko": "사십육초",
+    "en": "forty-six seconds",
+    "ja": "よんじゅうろくびょう"
+  },
+  "hash_244630245b8acf19": {
+    "ko": "목소리",
+    "en": "Voice",
+    "ja": "声"
+  },
+  "hash_24d7a8394b7d57d1": {
+    "ko": "실행하려면 가운데 버튼을 누르세요",
+    "en": "Press the center button to run",
+    "ja": "実行するには中央ボタンを押してください"
+  },
+  "hash_24e2fdba5c191325": {
+    "ko": "삼십초",
+    "en": "thirty seconds",
+    "ja": "さんじゅうびょう"
+  },
+  "hash_254fef10adc36f58": {
+    "ko": "단계 중",
+    "en": "Vibration step ",
+    "ja": "振動段階 "
+  },
+  "hash_255b5cc3b09c05fe": {
+    "ko": "세 번째",
+    "en": "third",
+    "ja": "第三 (だいさん)"
+  },
+  "hash_28811894ad6bbf0f": {
+    "ko": "틀렸습니다. 다시 선택해 보세요.",
+    "en": "Incorrect. Please try choosing again.",
+    "ja": "違います。もう一度選んでみてください。"
+  },
+  "hash_291d388d58d89190": {
+    "ko": "크로스 메모리",
+    "en": "Cross Memory",
+    "ja": "クロスメモリー"
+  },
+  "hash_29f50635dc89fa0c": {
+    "ko": "삼십오",
+    "en": "Thirty-five",
+    "ja": "さんじゅうご"
+  },
+  "hash_2a9840a0a0eaebdf": {
+    "ko": "앱 실행에 실패했습니다",
+    "en": "Failed to launch the app.",
+    "ja": "アプリの実行に失敗しました"
+  },
+  "hash_2ad54e7d59f243ec": {
+    "ko": "시간이 초과되어 무응답 오답 처리되었습니다. 다음 문항으로 진행하려면 가운데 키를 눌러주세요.",
+    "en": "Time out! Marked as incorrect due to no response. Press Center key to proceed.",
+    "ja": "時間切れです！無応答のため不正解と判定されました。中央キーを押して次に進んでください。"
+  },
+  "hash_2b014ace1aeb3cdc": {
+    "ko": "십일분",
+    "en": "Eleven",
+    "ja": "じゅういっぷん"
+  },
+  "hash_2b33e10fbfdddb0e": {
+    "ko": "삭제",
+    "en": "Clear",
+    "ja": "削除"
+  },
+  "hash_2bb15f52bc0814ae": {
+    "ko": "십칠분",
+    "en": "Seventeen",
+    "ja": "じゅうななふん"
+  },
+  "hash_2c04c366a8dd7a5f": {
+    "ko": "십육",
+    "en": "Sixteen",
+    "ja": "じゅうろく"
+  },
+  "hash_2dce1ce067b6a54e": {
+    "ko": "끄기",
+    "en": "Off",
+    "ja": "無効化"
+  },
+  "hash_2e92925a42acee02": {
+    "ko": "오십오초",
+    "en": "fifty-five seconds",
+    "ja": "ごじゅうごびょう"
+  },
+  "hash_312e419a75450440": {
+    "ko": "육",
+    "en": "Six",
+    "ja": "ろく"
+  },
+  "hash_35b6c7d736c3e47f": {
+    "ko": "오십구분",
+    "en": "Fifty-nine",
+    "ja": "ごじゅうきゅうふん"
+  },
+  "hash_36cdb2b0da57b56c": {
+    "ko": "십육초",
+    "en": "sixteen seconds",
+    "ja": "じゅうろくびょう"
+  },
+  "hash_371e71558451aa09": {
+    "ko": "칠초",
+    "en": "seven seconds",
+    "ja": "ななびょう"
+  },
+  "hash_3897b1e7092b992e": {
+    "ko": "오십이분",
+    "en": "Fifty-two",
+    "ja": "ごじゅうにふん"
+  },
+  "hash_3aacccf0431b2aa5": {
+    "ko": "이십삼분",
+    "en": "Twenty-three",
+    "ja": "にじゅうさんぷん"
+  },
+  "hash_3ad87e306144ec8b": {
+    "ko": "먼저 화면 중앙에 점멸되는 십자가를 찾아 손가락을 올린 뒤 가운데 키를 눌러 주세요",
+    "en": "First, find the blinking cross in the center of the screen, place your finger on it, and press the center key.",
+    "ja": "まず、画面中央で点滅している十字を探して指をのせ、中央のキーを押してください。"
+  },
+  "hash_3c6ada2bdc6e110b": {
+    "ko": "삼십구분",
+    "en": "Thirty-nine",
+    "ja": "さんじゅうきゅうふん"
+  },
+  "hash_3e1543326f3682fe": {
+    "ko": "삼",
+    "en": "Three",
+    "ja": "さん"
+  },
+  "hash_3fc6a262c8b889b2": {
+    "ko": "첫 번째",
+    "en": "first",
+    "ja": "第一 (だいいち)"
+  },
+  "hash_40613832ca9f6029": {
+    "ko": "도구 닫기",
+    "en": "Close tools",
+    "ja": "ツールを閉じる"
+  },
+  "hash_410fd9b565ba87eb": {
+    "ko": "픽셀 드로잉 게임이 시작되었습니다. \n                    방향키로 이동하고, 중앙키를 눌러 현재 선택된 도구로 그림을 그리거나 지웁니다. \n                    기능 키를 누르면 그리기 모드와 지우기 모드가 전환됩니다. \n                    메뉴 키를 누르면 브러시 크기를 조절할 수 있는 메뉴가 열립니다. \n                    중앙 키를 누른 채 방향키를 누르면 이동하면서 그리거나 지우는게 가능합니다. \n                    자유롭게 그림을 그려보세요!",
+    "en": "The pixel drawing game has started. \nUse the arrow keys to move, and press the center key to draw or erase with the currently selected tool. \nPress the function key to switch between drawing and erasing modes. \nPress the menu key to open a menu where you can adjust the brush size.\nHold down the center key and press the arrow keys to draw or erase while moving.\nDraw freely!",
+    "ja": "\n                    ピクセル描画ゲームが始まりました。\n 方向キーに移動し、中央キーを押して現在選択されているツールで画像を描画または消去します。 \nファンクションキーを押すと、描画モードと消去モードが切り替わります。\nメニューキーを押すと、ブラシのサイズを変更できるメニューが開きます。\n中央キーを押しながら方向キーを押すと、移動しながら描画または消去することができます。\n自由に絵を描いてみてください！\n                    "
+  },
+  "hash_41f58923264a011e": {
+    "ko": "십이분",
+    "en": "Twelve",
+    "ja": "じゅうにふん"
+  },
+  "hash_42a5429fab94a60c": {
+    "ko": "그래프",
+    "en": "Graph",
+    "ja": "グラフ"
+  },
+  "hash_43416c8cb20187bb": {
+    "ko": "크로스 메모리 튜토리얼입니다. 이 게임은 중앙을 기준으로 상하좌우에 있는 점의 위치를 기억하는 게임입니다.",
+    "en": "This is the Cross Memory tutorial. It is a game where you remember the positions of dots located above, below, left, and right of the center.",
+    "ja": "クロスメモリーのチュートリアルです。このゲームは、中央を基準にして上下左右にある点の位置を記憶するゲームです。"
+  },
+  "hash_436c35d6a262d809": {
+    "ko": "사십구분",
+    "en": "Forty-nine",
+    "ja": "よんじゅうきゅうふん"
+  },
+  "hash_43c78ef7c9176565": {
+    "ko": "시계",
+    "en": "Clock",
+    "ja": "時計"
+  },
+  "hash_443c6d3259705707": {
+    "ko": "느리게",
+    "en": "Slow",
+    "ja": "遅い"
+  },
+  "hash_44735103d240bd74": {
+    "ko": "오십육초",
+    "en": "fifty-six seconds",
+    "ja": "ごじゅうろくびょう"
+  },
+  "hash_459f5ddd38c4827a": {
+    "ko": "오십칠초",
+    "en": "fifty-seven seconds",
+    "ja": "ごじゅうななびょう"
+  },
+  "hash_46c6ecf3bb34a3e5": {
+    "ko": "이십구초",
+    "en": "twenty-nine seconds",
+    "ja": "にじゅうきゅうびょう"
+  },
+  "hash_485439586a24c577": {
+    "ko": "게임을 다시 시작합니다.",
+    "en": "Restarting game.",
+    "ja": "ゲームを再スタートします。"
+  },
+  "hash_4990573b9d6c9dd2": {
+    "ko": "그림판",
+    "en": "Painting",
+    "ja": "絵画"
+  },
+  "hash_4af487d671a519ee": {
+    "ko": "이십삼초",
+    "en": "twenty-three seconds",
+    "ja": "にじゅうさんびょう"
+  },
+  "hash_4b52677d88203e01": {
+    "ko": "삼십팔초",
+    "en": "thirty-eight seconds",
+    "ja": "さんじゅうはちびょう"
+  },
+  "hash_4bed64de97f7516c": {
+    "ko": "십삼분",
+    "en": "Thirteen",
+    "ja": "じゅうさんぷん"
+  },
+  "hash_4d41e60d6171668d": {
+    "ko": "사십",
+    "en": "Forty",
+    "ja": "よんじゅう"
+  },
+  "hash_4eb072027cc79c82": {
+    "ko": "테트리스",
+    "en": "Tetris",
+    "ja": "テトリス"
+  },
+  "hash_4eb2d22781186908": {
+    "ko": "이십오초",
+    "en": "twenty-five seconds",
+    "ja": "にじゅうごびょう"
+  },
+  "hash_4f7bf311b2ba1e84": {
+    "ko": "다섯 번째",
+    "en": "fifth",
+    "ja": "第五 (だいご)"
+  },
+  "hash_50a2c5d1c346b90c": {
+    "ko": "삼십팔분",
+    "en": "Thirty-eight",
+    "ja": "さんじゅうはっぷん"
+  },
+  "hash_50f2094f399f7418": {
+    "ko": "언어",
+    "en": "Language",
+    "ja": "言語"
+  },
+  "hash_52624df6aaf1b7da": {
+    "ko": "사분",
+    "en": "Four",
+    "ja": "よんぷん"
+  },
+  "hash_52be438b2bdceef0": {
+    "ko": "이십이",
+    "en": "Twenty-two",
+    "ja": "にじゅうに"
+  },
+  "hash_5377763ffa1bc79a": {
+    "ko": "십삼",
+    "en": "Thirteen",
+    "ja": "じゅうさん"
+  },
+  "hash_543ff9bdc325d707": {
+    "ko": "이십구분",
+    "en": "Twenty-nine",
+    "ja": "にじゅうきゅうふん"
+  },
+  "hash_55d6587e5aef40ba": {
+    "ko": "십육분",
+    "en": "Sixteen",
+    "ja": "じゅうろっぷん"
+  },
+  "hash_56c2cac9813cd24b": {
+    "ko": "아홉 번째",
+    "en": "ninth",
+    "ja": "第九 (だいきゅう)"
+  },
+  "hash_5979d44d7c1198dc": {
+    "ko": "패턴 데모",
+    "en": "Pattern demo",
+    "ja": "パターンデモ"
+  },
+  "hash_5b1abcfc70f8fd18": {
+    "ko": "정말로 게임 점수와 진행률을 초기화하시겠습니까? 가운데 키를 누르면 완전히 초기화하고, 펑션 키를 누르면 취소합니다.",
+    "en": "Are you sure you want to reset your score and progress? Press Center to confirm, Function to cancel.",
+    "ja": "本当にゲームスコアと進行状況を初期化しますか？中央キーを押すと初期化し、ファンクションキーを押すとキャンセルします。"
+  },
+  "hash_5b31f264be9995bb": {
+    "ko": "방금 사라진 순서대로 키를 눌러보세요.",
+    "en": "Press the keys in the order they just disappeared.",
+    "ja": "先ほど消えた順番通りにキーを押してみてください。"
+  },
+  "hash_5bb2ab31a81cb848": {
+    "ko": "십칠",
+    "en": "Seventeen",
+    "ja": "じゅうなな"
+  },
+  "hash_5c0ed0f9759fb69a": {
+    "ko": "열 번째",
+    "en": "tenth",
+    "ja": "第十 (だいじゅう)"
+  },
+  "hash_5d2880836910a5b5": {
+    "ko": "오십이초",
+    "en": "fifty-two seconds",
+    "ja": "ごじゅうにびょう"
+  },
+  "hash_5decc55221b4fef4": {
+    "ko": "네시",
+    "en": "Four",
+    "ja": "よじ"
+  },
+  "hash_5dfcb62a778e83b7": {
+    "ko": "오십",
+    "en": "Fifty",
+    "ja": "ごじゅう"
+  },
+  "hash_5e62f3fb1e91a24f": {
+    "ko": "열시",
+    "en": "Ten",
+    "ja": "じゅうじ"
+  },
+  "hash_5ef4c0f52e2c7aa5": {
+    "ko": "삼십칠분",
+    "en": "Thirty-seven",
+    "ja": "さんじゅうななふん"
+  },
+  "hash_5fbe4765dc307351": {
+    "ko": "칠분",
+    "en": "Seven",
+    "ja": "ななふん"
+  },
+  "hash_616c1a35e14734ea": {
+    "ko": "촉지시험",
+    "en": "Tactile Test",
+    "ja": "触覚テスト"
+  },
+  "hash_62cc03f643e4db09": {
+    "ko": "삼십일분",
+    "en": "Thirty-one",
+    "ja": "さんじゅういっぷん"
+  },
+  "hash_63287bca68505355": {
+    "ko": "사십오",
+    "en": "Forty-five",
+    "ja": "よんじゅうご"
+  },
+  "hash_64045a22ee97dead": {
+    "ko": "미러링 종료",
+    "en": "Mirroring Finished",
+    "ja": "ミラーリング終了"
+  },
+  "hash_6617c2cccaf39704": {
+    "ko": "열두시",
+    "en": "Twelve",
+    "ja": "じゅうにじ"
+  },
+  "hash_67ade110051e0e5f": {
+    "ko": "촉각 게임에 오신 것을 환영합니다. 센터 키를 누르면 즉시 게임이 시작됩니다.",
+    "en": "Welcome to Tactile Game! Press Center key to start.",
+    "ja": "触覚ゲームへようこそ！センターキーを押すとすぐにゲームが開始されます。"
+  },
+  "hash_6aeae5c540b4abbe": {
+    "ko": "다섯시",
+    "en": "Five",
+    "ja": "ごじ"
+  },
+  "hash_6d6359094d0a7e24": {
+    "ko": "이",
+    "en": "Two",
+    "ja": "に"
+  },
+  "hash_6e55451e223b1750": {
+    "ko": "단계 중",
+    "en": " Vibration step ",
+    "ja": "段階中、"
+  },
+  "hash_6eea9a121dcb9ba9": {
+    "ko": "네트워크 테스트",
+    "en": "Network test",
+    "ja": "ネットワークテスト"
+  },
+  "hash_6f526a39e85633dd": {
+    "ko": "사십팔",
+    "en": "Forty-eight",
+    "ja": "よんじゅうはち"
+  },
+  "hash_6fd2acd1f0107e64": {
+    "ko": "영분",
+    "en": "Zero",
+    "ja": "ゼロ分"
+  },
+  "hash_7217c9bcd1abf4f2": {
+    "ko": "십초",
+    "en": "ten seconds",
+    "ja": "じゅうびょう"
+  },
+  "hash_72489ed833d4db01": {
+    "ko": "사십일초",
+    "en": "forty-one seconds",
+    "ja": "よんじゅういちびょう"
+  },
+  "hash_729ad4d6756ea580": {
+    "ko": "사십육",
+    "en": "Forty-six",
+    "ja": "よんじゅうろく"
+  },
+  "hash_72fbfcf9e5894b0f": {
+    "ko": "사십칠분",
+    "en": "Forty-seven",
+    "ja": "よんじゅうななふん"
+  },
+  "hash_73a1abd9d348eb6f": {
+    "ko": "점 찾기 게임",
+    "en": "Find Dot Game",
+    "ja": "ドット検索ゲーム"
+  },
+  "hash_7549615cdaac9ab8": {
+    "ko": "구초",
+    "en": "nine seconds",
+    "ja": "きゅうびょう"
+  },
+  "hash_75d8e22c657d9621": {
+    "ko": "번.",
+    "en": " number.",
+    "ja": "番。"
+  },
+  "hash_78eaa72b465df58c": {
+    "ko": "삼십사",
+    "en": "Thirty-four",
+    "ja": "さんじゅうよん"
+  },
+  "hash_7a11b0275ba1c37c": {
+    "ko": "오분",
+    "en": "Five",
+    "ja": "ごふん"
+  },
+  "hash_7ab97e393691acd2": {
+    "ko": "사십사",
+    "en": "Forty-four",
+    "ja": "よんじゅうよん"
+  },
+  "hash_7d322ad36b703c87": {
+    "ko": "삼십육분",
+    "en": "Thirty-six",
+    "ja": "さんじゅうろっぷん"
+  },
+  "hash_7da243d74d111581": {
+    "ko": "영",
+    "en": "Zero",
+    "ja": "ゼロ"
+  },
+  "hash_7f5cf4e8fbf8cb25": {
+    "ko": "오십사분",
+    "en": "Fifty-four",
+    "ja": "ごじゅうよんぷん"
+  },
+  "hash_7fdd923b41889abf": {
+    "ko": "사십오초",
+    "en": "forty-five seconds",
+    "ja": "よんじゅうごびょう"
+  },
+  "hash_7ffbd0feecd5d360": {
+    "ko": "사십이분",
+    "en": "Forty-two",
+    "ja": "よんじゅうにふん"
+  },
+  "hash_80ce7e22bcd5a78b": {
+    "ko": "십구",
+    "en": "Nineteen",
+    "ja": "じゅうきゅう"
+  },
+  "hash_81a8f839672d3aa7": {
+    "ko": "볼륨",
+    "en": "Volume",
+    "ja": "ボリューム"
+  },
+  "hash_829dfe1795ce0092": {
+    "ko": "사십사초",
+    "en": "forty-four seconds",
+    "ja": "よんじゅうよんびょう"
+  },
+  "hash_84d582d46e339ded": {
+    "ko": "삼십일",
+    "en": "Thirty-one",
+    "ja": "さんじゅういち"
+  },
+  "hash_86d0553b769bbe15": {
+    "ko": "사십초",
+    "en": "forty seconds",
+    "ja": "よんじゅうびょう"
+  },
+  "hash_871d8aea274a643f": {
+    "ko": "오전",
+    "en": "AM",
+    "ja": "午前"
+  },
+  "hash_88045c09dc085945": {
+    "ko": "오초",
+    "en": "five seconds",
+    "ja": "ごびょう"
+  },
+  "hash_886fa40aca692b16": {
+    "ko": "사십오분",
+    "en": "Forty-five",
+    "ja": "よんじゅうごふん"
+  },
+  "hash_893b78c6ec276982": {
+    "ko": "이십이분",
+    "en": "Twenty-two",
+    "ja": "にじゅうにふん"
+  },
+  "hash_8a3b082cfe2ab249": {
+    "ko": "이십육",
+    "en": "Twenty-six",
+    "ja": "にじゅうろく"
+  },
+  "hash_8abafb76a4b106a6": {
+    "ko": "일곱시",
+    "en": "Seven",
+    "ja": "しちじ"
+  },
+  "hash_8bc01268a138ef4d": {
+    "ko": "일곱 번째",
+    "en": "seventh",
+    "ja": "第七 (だいなな)"
+  },
+  "hash_8cbed878bba1135f": {
+    "ko": "삼십팔",
+    "en": "Thirty-eight",
+    "ja": "さんじゅうはち"
+  },
+  "hash_8ee282bee7d6d7a5": {
+    "ko": "요청 전송 실패. 에러 코드",
+    "en": "Failed to send request. Error code ",
+    "ja": "リクエスト送信失敗。エラーコード "
+  },
+  "hash_8ff0d96d8a40decb": {
+    "ko": "방향키로 위치를 이동하고,\n                중앙 키를 누르면 점을 하나씩 그리거나 지울 수 있습니다.\n                기능 키를 누르면 그리기 도구와 지우기 도구가 전환됩니다.\n                지금부터 그림을 그려보세요!",
+    "en": "Move the cursor using the arrow keys,\n                and press the Center key to draw or erase dots one by one.\n                Press the Function key to switch between the Draw and Erase tools.\n                Start drawing now!",
+    "ja": "ゲームが始まりました。方向キーで位置を移動し、\n                中央キーを押すと、ポイントを1つずつ描画または消去できます。\n                ファンクションキーを押すと、描画ツールと消去ツールが切り替わります。\n                これから絵を描いてみてください！"
+  },
+  "hash_9026a60a20b21660": {
+    "ko": "십팔분",
+    "en": "Eighteen",
+    "ja": "じゅうはっぷん"
+  },
+  "hash_913a04b5ccabdcab": {
+    "ko": "빠르게",
+    "en": "Fast",
+    "ja": "速い"
+  },
+  "hash_93377430e551015f": {
+    "ko": "십구초",
+    "en": "nineteen seconds",
+    "ja": "じゅうきゅうびょう"
+  },
+  "hash_93a0c4e4aa7cf51e": {
+    "ko": "사십일",
+    "en": "Forty-one",
+    "ja": "よんじゅういち"
+  },
+  "hash_93f107a83cb67645": {
+    "ko": "사십분",
+    "en": "Forty",
+    "ja": "よんじゅっぷん"
+  },
+  "hash_956165305f4c1876": {
+    "ko": "작게",
+    "en": "Smaller",
+    "ja": "小さく"
+  },
+  "hash_9642870084781714": {
+    "ko": "이십오",
+    "en": "Twenty-five",
+    "ja": "にじゅうご"
+  },
+  "hash_97aed2072ee214ad": {
+    "ko": "두 번째",
+    "en": "second",
+    "ja": "第二 (だいに)"
+  },
+  "hash_97f9782920fde4aa": {
+    "ko": "십이초",
+    "en": "twelve seconds",
+    "ja": "じゅうにびょう"
+  },
+  "hash_9839bfc4246f966c": {
+    "ko": "십사",
+    "en": "Fourteen",
+    "ja": "じゅうよん"
+  },
+  "hash_984ee616de61aaaa": {
+    "ko": "삼십구",
+    "en": "Thirty-nine",
+    "ja": "さんじゅうきゅう"
+  },
+  "hash_99a1d173f5aa966f": {
+    "ko": "초기화를 취소하고 일시정지 화면으로 돌아왔습니다.",
+    "en": "Reset cancelled. Back to pause screen.",
+    "ja": "初期化をキャンセルし、一時停止画面に戻りました。"
+  },
+  "hash_99e27148559f76ad": {
+    "ko": "설정",
+    "en": "Settings",
+    "ja": "設定"
+  },
+  "hash_9a2d0c075ec0f5e8": {
+    "ko": "뷰 모드",
+    "en": "View mode",
+    "ja": "ビューモード"
+  },
+  "hash_9ab81b4a2ec0f070": {
+    "ko": "삼십오초",
+    "en": "thirty-five seconds",
+    "ja": "さんじゅうごびょう"
+  },
+  "hash_9d4dc8c931131036": {
+    "ko": "정말로 게임 진행률을 초기화하시겠습니까? 가운데 키를 누르면 완전히 초기화하고, 펑션 키를 누르면 취소합니다.",
+    "en": "Are you sure you want to reset your progress? Press Center to confirm, Function to cancel.",
+    "ja": "本当にゲームの進行状況を初期化しますか？中央キーを押すと初期化し、ファンクションキーを押すとキャンセルします。"
+  },
+  "hash_9f4d5722b6358818": {
+    "ko": "도구선택",
+    "en": "Tool Selection",
+    "ja": "ツール選択"
+  },
+  "hash_a115935910d679f3": {
+    "ko": "테스트를 모두 마쳤습니다. 고생했어요. 감사합니다.",
+    "en": "The test is completely finished. Thank you for your hard work.",
+    "ja": "テストはすべて終了しました。お疲れ様でした。ありがとうございました。"
+  },
+  "hash_a19af16e3b5a071f": {
+    "ko": "게임을 시작합니다. 1번 문제. 위의 퀴즈 상자를 손가락으로 만져보고, 아래 선택 바에서 같은 강도의 진동을 찾아 선택해 보세요.",
+    "en": "Start game. Question 1. Feel the quiz box at the top, and choose the same vibration intensity in the answer bar below.",
+    "ja": "ゲームを開始します。問 1。上のクイズボックスを指で触って、下の選択バーから同じ強さの振動を探して選択してください。"
+  },
+  "hash_a21a70ee157079f1": {
+    "ko": "한시",
+    "en": "One",
+    "ja": "いちじ"
+  },
+  "hash_a3522ef28778bf2a": {
+    "ko": "네 번째",
+    "en": "fourth",
+    "ja": "第四 (だいよん)"
+  },
+  "hash_a3de7bcb10a6ac03": {
+    "ko": "정답입니다! 다음 문항으로 진행하려면 가운데 키를 눌러주세요.",
+    "en": "Correct! Press Center key to proceed to the next question.",
+    "ja": "正解です！次の問題に進むには中央キーを押してください。"
+  },
+  "hash_a4852ce6d41eeb29": {
+    "ko": "켜기",
+    "en": "On",
+    "ja": "活性化"
+  },
+  "hash_a6c8924f82ab9619": {
+    "ko": "메모",
+    "en": "Memo",
+    "ja": "メモ"
+  },
+  "hash_a72c551916a0d3f9": {
+    "ko": "사십팔초",
+    "en": "forty-eight seconds",
+    "ja": "よんじゅうはちびょう"
+  },
+  "hash_a7fac075b2503509": {
+    "ko": "데모",
+    "en": "Demo",
+    "ja": "デモ"
+  },
+  "hash_a9352f78ce62516c": {
+    "ko": "십칠초",
+    "en": "seventeen seconds",
+    "ja": "じゅうななびょう"
+  },
+  "hash_a935642da73430ad": {
+    "ko": "십구분",
+    "en": "Nineteen",
+    "ja": "じゅうきゅうふん"
+  },
+  "hash_aa080a95ae7e3ee4": {
+    "ko": "오십팔분",
+    "en": "Fifty-eight",
+    "ja": "ごじゅうはっぷん"
+  },
+  "hash_aa712bcd9b96f5bf": {
+    "ko": "오십칠분",
+    "en": "Fifty-seven",
+    "ja": "ごじゅうななふん"
+  },
+  "hash_aafbc8d40be47617": {
+    "ko": "십오초",
+    "en": "fifteen seconds",
+    "ja": "じゅうごびょう"
+  },
+  "hash_abc687a67de595e5": {
+    "ko": "정답입니다!",
+    "en": "Correct!",
+    "ja": "正解です！"
+  },
+  "hash_abf34d67002fee30": {
+    "ko": "세시",
+    "en": "Three",
+    "ja": "さんじ"
+  },
+  "hash_abff4a7a8ae6f1d2": {
+    "ko": "실시간 날씨",
+    "en": "Weather Report",
+    "ja": "お天気情報"
+  },
+  "hash_acb33a163f18154d": {
+    "ko": "이제 두 개의 점이 순서대로 사라집니다. 잘 듣고 기억해 보세요.",
+    "en": "Now two dots will disappear in order. Listen carefully and remember.",
+    "ja": "これから2つの点が順番に消えます。よく聞いて覚えてみてください。"
+  },
+  "hash_ad72419ba2c958e5": {
+    "ko": "게임 시작",
+    "en": "Game Start",
+    "ja": "ゲーム開始"
+  },
+  "hash_add5901cfc91ba98": {
+    "ko": "이십육초",
+    "en": "twenty-six seconds",
+    "ja": "にじゅうろくびょう"
+  },
+  "hash_b026a087e3fbe599": {
+    "ko": "이십팔분",
+    "en": "Twenty-eight",
+    "ja": "にじゅうはっぷん"
+  },
+  "hash_b2564675a4b413fe": {
+    "ko": "촉각게임",
+    "en": "Tactile Game",
+    "ja": "触覚ゲーム"
+  },
+  "hash_b2ee6b62a34a4126": {
+    "ko": "삼십육",
+    "en": "Thirty-six",
+    "ja": "さんじゅうろく"
+  },
+  "hash_b394db7ba388f0f7": {
+    "ko": "런처",
+    "en": "Launcher",
+    "ja": "ランチャー"
+  },
+  "hash_b41fd47e05837b96": {
+    "ko": "오십초",
+    "en": "fifty seconds",
+    "ja": "ごじゅうびょう"
+  },
+  "hash_b433a335420428ad": {
+    "ko": "사십칠",
+    "en": "Forty-seven",
+    "ja": "よんじゅうなな"
+  },
+  "hash_b437159eb014ca61": {
+    "ko": "아홉시",
+    "en": "Nine",
+    "ja": "くじ"
+  },
+  "hash_b47a622d28181487": {
+    "ko": "일본어",
+    "en": "Japanese",
+    "ja": "日本語"
+  },
+  "hash_b5799912fb4b40ee": {
+    "ko": "이십일초",
+    "en": "twenty-one seconds",
+    "ja": "にじゅういちびょう"
+  },
+  "hash_b7aaf97eeae4ab39": {
+    "ko": "오십팔초",
+    "en": "fifty-eight seconds",
+    "ja": "ごじゅうはちびょう"
+  },
+  "hash_b82046ab8506c119": {
+    "ko": "열한시",
+    "en": "Eleven",
+    "ja": "じゅういちじ"
+  },
+  "hash_b8674525a5188fef": {
+    "ko": "팔초",
+    "en": "eight seconds",
+    "ja": "はちびょう"
+  },
+  "hash_b8a967d46cdefe92": {
+    "ko": "브러시 크기 변경.",
+    "en": "Change brush size",
+    "ja": "ブラシサイズの変更"
+  },
+  "hash_b8f153924d63827b": {
+    "ko": "이십칠",
+    "en": "Twenty-seven",
+    "ja": "にじゅうなな"
+  },
+  "hash_b937e63f7e2af043": {
+    "ko": "삼십삼",
+    "en": "Thirty-three",
+    "ja": "さんじゅうさん"
+  },
+  "hash_b96d6777f4e3df8d": {
+    "ko": "여덟시",
+    "en": "Eight",
+    "ja": "はちじ"
+  },
+  "hash_ba0ac1a188155b07": {
+    "ko": "십사초",
+    "en": "fourteen seconds",
+    "ja": "じゅうよんびょう"
+  },
+  "hash_ba937b5d15a8df4e": {
+    "ko": "오디오 테스트",
+    "en": "Audio test",
+    "ja": "オーディオテスト"
+  },
+  "hash_baab21349f6430c9": {
+    "ko": "속도",
+    "en": "Speed",
+    "ja": "速度"
+  },
+  "hash_baffd03f05e89eb5": {
+    "ko": "삼십칠초",
+    "en": "thirty-seven seconds",
+    "ja": "さんじゅうななびょう"
+  },
+  "hash_bb2d6f6306c0ebff": {
+    "ko": "사십팔분",
+    "en": "Forty-eight",
+    "ja": "よんじゅうはっぷん"
+  },
+  "hash_bd1bec2c626c0cf4": {
+    "ko": "삼십사초",
+    "en": "thirty-four seconds",
+    "ja": "さんじゅうよんびょう"
+  },
+  "hash_bd6ece63f5fc3d42": {
+    "ko": "이십칠분",
+    "en": "Twenty-seven",
+    "ja": "にじゅうななふん"
+  },
+  "hash_bdab2c1f6ab38c31": {
+    "ko": "삼분",
+    "en": "Three",
+    "ja": "さんぷん"
+  },
+  "hash_be70795d5070933b": {
+    "ko": "삼십오분",
+    "en": "Thirty-five",
+    "ja": "さんじゅうごふん"
+  },
+  "hash_bea26d9dfa41f3cd": {
+    "ko": "게임을 초기화했습니다. 메인 화면입니다.",
+    "en": "Game has been reset. Back to main screen.",
+    "ja": "ゲームを初期化しました。メイン画面です。"
+  },
+  "hash_bf69576ac1429aca": {
+    "ko": "여섯시",
+    "en": "Six",
+    "ja": "ろくじ"
+  },
+  "hash_bf8bfe51f9ab8996": {
+    "ko": "사십삼분",
+    "en": "Forty-three",
+    "ja": "よんじゅうさんぷん"
+  },
+  "hash_bfe79fbcbd7e63cf": {
+    "ko": "십이",
+    "en": "Twelve",
+    "ja": "じゅうに"
+  },
+  "hash_c02e59811465a02b": {
+    "ko": "구분",
+    "en": "Nine",
+    "ja": "きゅうふん"
+  },
+  "hash_c09dabb5002dcd4b": {
+    "ko": "삼십분",
+    "en": "Thirty",
+    "ja": "さんじゅっぷん"
+  },
+  "hash_c0a7a3fbf74c549d": {
+    "ko": "정말로 게임을 초기화하시겠습니까? 가운데 키를 누르면 초기화하고, 펑션 키를 누르면 취소합니다.",
+    "en": "Are you sure you want to reset? Press Center to confirm, Function to cancel.",
+    "ja": "本当にゲームを初期化しますか？中央キーを押すと初期化し、ファンクションキーを押すとキャンセルします。"
+  },
+  "hash_c18d2fe5afd7b8ec": {
+    "ko": "삼십일초",
+    "en": "thirty-one seconds",
+    "ja": "さんじゅういちびょう"
+  },
+  "hash_c20ae46f30146eb7": {
+    "ko": "여섯 번째",
+    "en": "sixth",
+    "ja": "第六 (だいろく)"
+  },
+  "hash_c21db0be1c39b5dd": {
+    "ko": "이십사분",
+    "en": "Twenty-four",
+    "ja": "にじゅうよんぷん"
+  },
+  "hash_c26c5efb5bcd7e8e": {
+    "ko": "영어",
+    "en": "English",
+    "ja": "英語"
+  },
+  "hash_c3c2c009775ed918": {
+    "ko": "일",
+    "en": "One",
+    "ja": "いち"
+  },
+  "hash_c3f8250ba03f8274": {
+    "ko": "오십육분",
+    "en": "Fifty-six",
+    "ja": "ごじゅうろっぷん"
+  },
+  "hash_c4ec7a35a06598ab": {
+    "ko": "이십",
+    "en": "Twenty",
+    "ja": "にじゅう"
+  },
+  "hash_c6bacc984065c317": {
+    "ko": "팔분",
+    "en": "Eight",
+    "ja": "はっぷん"
+  },
+  "hash_c7ac545e4992be07": {
+    "ko": "캐시",
+    "en": "Cache",
+    "ja": "キャッシュ"
+  },
+  "hash_ca0ebc3b69ede8cd": {
+    "ko": "미러링",
+    "en": "Mirroring",
+    "ja": "ミラーリング"
+  },
+  "hash_cbc6abde065379df": {
+    "ko": "게임을 재개합니다.",
+    "en": "Game resumed.",
+    "ja": "ゲームを再開します。"
+  },
+  "hash_cf41a60e8a000312": {
+    "ko": "오전 열두시 영분 영초",
+    "en": "Twelve AM zero minutes zero seconds",
+    "ja": "午前十二時ゼロ分ゼロ秒"
+  },
+  "hash_cf759ed5f7d63a73": {
+    "ko": "사십구",
+    "en": "Forty-nine",
+    "ja": "よんじゅうきゅう"
+  },
+  "hash_cf9aefc8c5dcd757": {
+    "ko": "이십삼",
+    "en": "Twenty-three",
+    "ja": "にじゅうさん"
+  },
+  "hash_cfbb784fd4c40c4e": {
+    "ko": "십일",
+    "en": "Eleven",
+    "ja": "じゅういち"
+  },
+  "hash_d13f7aa4ffca6325": {
+    "ko": "여덟 번째",
+    "en": "eighth",
+    "ja": "第八 (だいはち)"
+  },
+  "hash_d16357ffc8a6da21": {
+    "ko": "이십오분",
+    "en": "Twenty-five",
+    "ja": "にじゅうごふん"
+  },
+  "hash_d17d0ac7ac9fe631": {
+    "ko": "이십구",
+    "en": "Twenty-nine",
+    "ja": "にじゅうきゅう"
+  },
+  "hash_d181936f89ad36ed": {
+    "ko": "이십이초",
+    "en": "twenty-two seconds",
+    "ja": "にじゅうにびょう"
+  },
+  "hash_d2451cec9b7cd41b": {
+    "ko": "지우기 도구",
+    "en": "Erase Tool",
+    "ja": "消去ツール"
+  },
+  "hash_d5af61d62130a475": {
+    "ko": "이십사초",
+    "en": "twenty-four seconds",
+    "ja": "にじゅうよんびょう"
+  },
+  "hash_d64edb0bda59d510": {
+    "ko": "대기 화면으로 돌아왔습니다.",
+    "en": "Returned to start screen.",
+    "ja": "待機画面に戻りました。"
+  },
+  "hash_d6ed7d24527f4dd7": {
+    "ko": "오십일분",
+    "en": "Fifty-one",
+    "ja": "ごじゅういっぷん"
+  },
+  "hash_d6f5b5a0bff09150": {
+    "ko": "십사분",
+    "en": "Fourteen",
+    "ja": "じゅうよんぷん"
+  },
+  "hash_da2ebb263b5b32c9": {
+    "ko": "사십사분",
+    "en": "Forty-four",
+    "ja": "よんじゅうよんぷん"
+  },
+  "hash_dc9aec2970136ac7": {
+    "ko": "준비",
+    "en": "Ready",
+    "ja": "準備"
+  },
+  "hash_e0f2a518c2a9ca13": {
+    "ko": "삼십이분",
+    "en": "Thirty-two",
+    "ja": "さんじゅうにふん"
+  },
+  "hash_e0f646abaa2bf2d2": {
+    "ko": "이십초",
+    "en": "twenty seconds",
+    "ja": "にじゅうびょう"
+  },
+  "hash_e253dc356e48ca14": {
+    "ko": "게임을 다시 시작합니다. 1번 문제.",
+    "en": "Restarting game. Question 1.",
+    "ja": "ゲームを再スタートします。問 1。"
+  },
+  "hash_e61a52cfb883e118": {
+    "ko": "남성",
+    "en": "Male",
+    "ja": "男性"
+  },
+  "hash_e6914347e4d26f32": {
+    "ko": "이십일분",
+    "en": "Twenty-one",
+    "ja": "にじゅういっぷん"
+  },
+  "hash_e82d792ff57879e3": {
+    "ko": "십오",
+    "en": "Fifteen",
+    "ja": "じゅうご"
+  },
+  "hash_e8f273aec9660488": {
+    "ko": "삼십삼분",
+    "en": "Thirty-three",
+    "ja": "さんじゅうさんぷん"
+  },
+  "hash_ea455d600c1443a6": {
+    "ko": "오십구초",
+    "en": "fifty-nine seconds",
+    "ja": "ごじゅうきゅうびょう"
+  },
+  "hash_ea5c9a337736e09c": {
+    "ko": "이십사",
+    "en": "Twenty-four",
+    "ja": "にじゅうよん"
+  },
+  "hash_ea8434c9a1587bc4": {
+    "ko": "육분",
+    "en": "Six",
+    "ja": "ろっぷん"
+  },
+  "hash_eab8f31b143c7dcb": {
+    "ko": "사십칠초",
+    "en": "forty-seven seconds",
+    "ja": "よんじゅうななびょう"
+  },
+  "hash_eaea121b1a510381": {
+    "ko": "이분",
+    "en": "Two",
+    "ja": "にふん"
+  },
+  "hash_eb897681d4501d32": {
+    "ko": "오십사초",
+    "en": "fifty-four seconds",
+    "ja": "ごじゅうよんびょう"
+  },
+  "hash_eb9431707bf43155": {
+    "ko": "오십오분",
+    "en": "Fifty-five",
+    "ja": "ごじゅうごふん"
+  },
+  "hash_ebb01039e1e5cbfb": {
+    "ko": "십일초",
+    "en": "eleven seconds",
+    "ja": "じゅういちびょう"
+  },
+  "hash_ebde7a0844f500e0": {
+    "ko": "십분",
+    "en": "Ten",
+    "ja": "じゅっぷん"
+  },
+  "hash_eefcb0a704fc23dc": {
+    "ko": "사십일분",
+    "en": "Forty-one",
+    "ja": "よんじゅういっぷん"
+  },
+  "hash_ef1bf28b01b0865d": {
+    "ko": "일분",
+    "en": "One",
+    "ja": "いっぷん"
+  },
+  "hash_ef7e18cb120c805e": {
+    "ko": "칠",
+    "en": "Seven",
+    "ja": "なな"
+  },
+  "hash_f00602495f7d790b": {
+    "ko": "삼십구초",
+    "en": "thirty-nine seconds",
+    "ja": "さんじゅうきゅうびょう"
+  },
+  "hash_f02e13606d14d139": {
+    "ko": "크게",
+    "en": "Larger",
+    "ja": "大きく"
+  },
+  "hash_f0eea68cb6a1205a": {
+    "ko": "오십일초",
+    "en": "fifty-one seconds",
+    "ja": "ごじゅういちびょう"
+  },
+  "hash_f11cec697fb8ad9b": {
+    "ko": "틀렸습니다. 시간 패널티가 주어집니다. 다시 선택해 보세요.",
+    "en": "Incorrect. Time penalty applied. Please try choosing again.",
+    "ja": "違います。時間ペナルティが与えられます。もう一度選んでみてください。"
+  },
+  "hash_f16b840b6613fe45": {
+    "ko": "사십삼초",
+    "en": "forty-three seconds",
+    "ja": "よんじゅうさんびょう"
+  },
+  "hash_f223c704ed15fba3": {
+    "ko": "편집 모드",
+    "en": "Edit mode",
+    "ja": "編集モード"
+  },
+  "hash_f2a78f5f37af16ce": {
+    "ko": "삼십육초",
+    "en": "thirty-six seconds",
+    "ja": "さんじゅうろくびょう"
+  },
+  "hash_f4633f1941819e33": {
+    "ko": "화면 중앙에 점멸되는 십자가를 찾아 손가락을 올린 뒤 가운데 키를 눌러 주세요",
+    "en": "Find the blinking cross in the center of the screen, place your finger on it, and press the center key.",
+    "ja": "画面中央で点滅している十字を探して指をのせ、中央のキーを押してください。"
+  },
+  "hash_f4f58ae03b4e0929": {
+    "ko": "브러시 크기가 변경되었습니다.",
+    "en": "Brush size has been changed.",
+    "ja": "ブラシサイズが変更されました。"
+  },
+  "hash_f5d371f2e422a5bc": {
+    "ko": "크로스 메모리. 상하 방향키로 모드를 선택하고 가운데 키를 누르세요.",
+    "en": "Cross Memory. Select a mode using the up and down arrow keys, then press the center key.",
+    "ja": "クロスメモリー。上下の方向キーでモードを選択し、中央のキーを押してください。"
+  },
+  "hash_f85588de2810c24b": {
+    "ko": "그리기 도구",
+    "en": "Draw Tool",
+    "ja": "描画ツール"
+  },
+  "hash_f89aac51a8faa680": {
+    "ko": "두시",
+    "en": "Two",
+    "ja": "にじ"
+  },
+  "hash_f932a4a6f017b84f": {
+    "ko": "선형 방정식",
+    "en": "Linear equation",
+    "ja": "線形方程式"
+  },
+  "hash_f933791e975b723a": {
+    "ko": "사초",
+    "en": "four seconds",
+    "ja": "よんびょう"
+  },
+  "hash_f9453a8c4d7ba254": {
+    "ko": "오십삼초",
+    "en": "fifty-three seconds",
+    "ja": "ごじゅうさんびょう"
+  },
+  "hash_fa445f5c90c6fe61": {
+    "ko": "오십삼분",
+    "en": "Fifty-three",
+    "ja": "ごじゅうさんぷん"
+  },
+  "hash_fbd73cee2c821765": {
+    "ko": "오",
+    "en": "Five",
+    "ja": "ご"
+  },
+  "hash_fc332012c81cf9c8": {
+    "ko": "사십이",
+    "en": "Forty-two",
+    "ja": "よんじゅうに"
+  },
+  "hash_fc4e66498da0f70a": {
+    "ko": "오후",
+    "en": "PM",
+    "ja": "午後"
+  },
+  "hash_fc59456fdc327b70": {
+    "ko": "인서트 모드",
+    "en": "Insert mode",
+    "ja": "インサートモード"
+  },
+  "hash_fc9fda53a6a8e5ce": {
+    "ko": "점 그리기",
+    "en": "Dot drawing",
+    "ja": "点を描く"
+  },
+  "hash_fd3af447a0a98c3a": {
+    "ko": "구",
+    "en": "Nine",
+    "ja": "きゅう"
+  },
+  "hash_ff654d95150fd922": {
+    "ko": "일초",
+    "en": "one second",
+    "ja": "いちびょう"
+  },
+  "hash_ff9e52cffed4592f": {
+    "ko": "육초",
+    "en": "six seconds",
+    "ja": "ろくびょう"
+  },
+  "segment_game_01_00_4ee99838": {
+    "ko": "게임을 시작합니다.",
+    "en": "Start game. ",
+    "ja": "ゲームを開始します。"
+  },
+  "segment_game_01_00_7115dfe0": {
+    "ko": "게임 종료.",
+    "en": "Game Over. ",
+    "ja": "ゲーム終了。 "
+  },
+  "segment_game_01_00_en_ca8d4a88": {
+    "ko": "",
+    "en": "This is the ",
+    "ja": ""
+  },
+  "segment_game_01_01_ac481854": {
+    "ko": "문제입니다. 위쪽 사각형부터 만져 보세요.",
+    "en": "question. Please feel the upper square first.",
+    "ja": "問です。上部の四角形から触ってみてください。"
+  },
+  "segment_game_01_01_ed0d7b63": {
+    "ko": "위의 퀴즈 상자를 손가락으로 만져보고,",
+    "en": " Feel the quiz box at the top, ",
+    "ja": "上のクイズボックスを指で触って、"
+  },
+  "segment_game_01_02_718dc432": {
+    "ko": "점. 다시 시작하시려면 가운데 키를 눌러주세요.",
+    "en": " points. Press center key to restart.",
+    "ja": "点。再起動するには中央キーを押してください。"
+  },
+  "segment_game_01_02_eda3d6c2": {
+    "ko": "아래 선택 바에서 같은 강도의 진동을 찾아 선택해 보세요.",
+    "en": "and choose the same vibration intensity in the answer bar below.",
+    "ja": "下の選択バーから同じ強さの振動を探して選択してください。"
+  },
+  "segment_game_01_02_en_3ab76b03": {
+    "ko": "문제입니다. 위쪽 사각형부터 만져 보세요.",
+    "en": "question. Please feel the upper square first.",
+    "ja": "問です。上部の四角形から触ってみてください。"
+  },
+  "segment_game_02_00_ecfdbb3b": {
+    "ko": "틀렸습니다.",
+    "en": "Incorrect. ",
+    "ja": "違います。 "
+  },
+  "segment_game_02_01_069a0ed1": {
+    "ko": "시간 패널티가 주어집니다.",
+    "en": "Time penalty applied. ",
+    "ja": "時間ペナルティが与えられます。 "
+  },
+  "segment_game_02_02_dbbb0448": {
+    "ko": "다시 선택해 보세요.",
+    "en": "Please try choosing again.",
+    "ja": "もう一度選んでみてください。"
+  },
+  "segment_game_03_00_en_f80b47c8": {
+    "ko": "레벨",
+    "en": "Level ",
+    "ja": "レベル "
+  },
+  "segment_game_03_01_86a220fd": {
+    "ko": "단계 진동",
+    "en": "Level vibration",
+    "ja": "段階の振動"
+  },
+  "segment_game_03_02_en_88633e8b": {
+    "ko": "",
+    "en": " vibration",
+    "ja": ""
+  },
+  "segment_game_04_00_en_923adbb3": {
+    "ko": "번 문제.",
+    "en": "Question ",
+    "ja": "番の問題"
+  },
+  "segment_game_04_01_f848ef49": {
+    "ko": "번 문제.",
+    "en": "Question ",
+    "ja": "番の問題"
+  },
+  "segment_game_05_00_9a3d7bb1": {
+    "ko": "시간이 초과되어 1점이 감점되었습니다. 현재 점수는",
+    "en": "Time out! 1 point deducted. Current score is ",
+    "ja": "時間切れです!1点減点されました。現在のスコアは"
+  },
+  "segment_game_05_02_2b76cad3": {
+    "ko": "점입니다. 다음",
+    "en": " points. Next, question ",
+    "ja": "点です。次の問"
+  },
+  "segment_game_05_04_637cf7dd": {
+    "ko": "번 문제입니다.",
+    "en": "",
+    "ja": "です。"
+  },
+  "segment_input_01_00_ea35f424": {
+    "ko": "도구 선택.",
+    "en": "Tool Selection. ",
+    "ja": "ツール選択。"
+  },
+  "segment_lib_01_00_06841f1b": {
+    "ko": "지금부터 점자 디스플레이로 촉지게임 테스트를 시작하겠습니다.",
+    "en": "We will now begin the tactile game test using the braille display.",
+    "ja": "ただいまから点字ディスプレイによる触覚ゲームテストを開始します。"
+  },
+  "segment_lib_01_00_0c5f58dd": {
+    "ko": "위로 이동.",
+    "en": "Move up. ",
+    "ja": "上に移動。 "
+  },
+  "segment_lib_01_00_11a7eeee": {
+    "ko": "설정 앱을 시작합니다. 위 아래 방향키로 설정 항목을 고르고 좌우 방향키로 값을 변경하세요. 첫 번째 항목,",
+    "en": "Starting Settings app. Use Up/Down to select items, Left/Right to change values. First item: ",
+    "ja": "設定アプリを開始します。上下キーで項目を選び、左右キーで値を変更してください。最初の項目："
+  },
+  "segment_lib_01_00_en_b6f68c08": {
+    "ko": "앱을 실행합니다",
+    "en": "Launching",
+    "ja": "アプリを起動します"
+  },
+  "segment_lib_01_00_en_f80b47c8": {
+    "ko": "레벨",
+    "en": "Level ",
+    "ja": "レベル "
+  },
+  "segment_lib_01_00_f83357d6": {
+    "ko": "방향키로 이동해 진동 패턴을 비교해 보세요. 모두 8개의 패턴이 있습니다.",
+    "en": "Use arrow keys to move and compare vibration patterns. There are 8 patterns in total.",
+    "ja": "方向キーで移動して振動パターンを比較してみてください。全部で8つのパターンがあります。"
+  },
+  "segment_lib_01_01_7d0ecd11": {
+    "ko": "화면 위쪽에는 큰 사각형이 있어요. 이 사각형 안에서 점들이 일정한 빠르기로 움직여요.",
+    "en": "There is a large square at the top of the screen. Inside this square, dots move at a constant speed.",
+    "ja": "画面の上部には大きな四角形があります。この四角形の中で、点が一定の速さで動いています。"
+  },
+  "segment_lib_01_01_a60ade1d": {
+    "ko": "앱을 실행합니다",
+    "en": "Launching",
+    "ja": "アプリを起動します"
+  },
+  "segment_lib_01_01_e467e631": {
+    "ko": "단계",
+    "en": "Level",
+    "ja": "段階"
+  },
+  "segment_lib_01_02_62d1f586": {
+    "ko": "화면 아래쪽에는 작은 사각형이 5개 있어요. 이 사각형들 안에서도 점들이 움직이는데, 각각 빠르기가 달라요.",
+    "en": "There are 5 small squares at the bottom of the screen. Dots also move inside these squares, but each at a different speed.",
+    "ja": "画面の下部には小さな四角形が5つあります。これらの四角形の中でも点が動いていますが、それぞれ速さが異なります。"
+  },
+  "segment_lib_01_02_653da327": {
+    "ko": ", 현재 값",
+    "en": ", Current value: ",
+    "ja": "、現在の値："
+  },
+  "segment_lib_01_02_en_84072ad9": {
+    "ko": "앱",
+    "en": "app",
+    "ja": "アプリ"
+  },
+  "segment_lib_01_03_329199ab": {
+    "ko": "아래쪽 사각형은 왼쪽부터 차례로 1번, 2번, 3번, 4번, 5번이에요.",
+    "en": "The bottom squares are numbered 1, 2, 3, 4, and 5 from left to right.",
+    "ja": "下部の四角形は、左から順に1番、2番、3番、4番、5番です。"
+  },
+  "segment_lib_01_04_7449e4eb": {
+    "ko": "먼저, 왼손이나 오른손 손가락으로 위쪽 큰 사각형을 만져서, 점이 움직이는 빠르기를 느껴 보세요.",
+    "en": "First, feel the upper large square with your finger to perceive the speed of the moving dots.",
+    "ja": "まず、左手または右手の人差し指で上部の大きな四角形に触れ、点が動く速さを感じてみてください。"
+  },
+  "segment_lib_01_05_6f465e36": {
+    "ko": "그 다음, 아래쪽에 있는 5개의 사각형을 하나씩 만져 보세요. 그 중에서 위쪽 사각형과 똑같은 빠르기로 움직이는 사각형을 찾은 다음 사각형의 번호를 말해보세요.",
+    "en": "Next, feel each of the 5 squares at the bottom one by one. Find the square that moves at the exact same speed as the upper square, and speak the number of that square.",
+    "ja": "次に、下部にある5つの四角形を1つずつ触ってみてください。その中から、上部の四角形とまったく同じ速さで動いている四角形を見つけ、その番号を口頭で答えてください。"
+  },
+  "segment_lib_01_06_ee32f178": {
+    "ko": "문제는 모두 10개예요. 준비되면 시작할께요.",
+    "en": "There are 10 questions in total. We will start when you are ready.",
+    "ja": "問題は全部で10問です。準備ができたら開始します。"
+  },
+  "segment_lib_02_00_0b6b2d22": {
+    "ko": "캐시가 비워졌습니다",
+    "en": "Cache cleared",
+    "ja": "キャッシュがクリアされました"
+  },
+  "segment_lib_02_00_0e438b40": {
+    "ko": "런처 앱을 시작합니다.",
+    "en": "Launcher started.",
+    "ja": "ランチャーを開始しました。"
+  },
+  "segment_lib_02_00_0f5f7e1f": {
+    "ko": "방향키로 이동해 진동 강도를 비교해 보세요. 펑션키를 누르면 단계수가 전환됩니다. 현재 단계",
+    "en": "Use arrow keys to move and compare vibration intensity. Press function key to toggle levels. Current level ",
+    "ja": "方向キーで移動して振動の強さを比較してみてください。ファンクションキーを押すと段階数が切り替わります。現在の段階 "
+  },
+  "segment_lib_02_00_8108b7b2": {
+    "ko": "아래로 이동.",
+    "en": "Move down. ",
+    "ja": "下に移動。 "
+  },
+  "segment_lib_02_00_8cddda59": {
+    "ko": "패턴:",
+    "en": "Pattern: ",
+    "ja": "パターン: "
+  },
+  "segment_lib_02_01_80f8453c": {
+    "ko": "상하좌우 방향키로 선택하고 엔터 키로 실행하세요.",
+    "en": " Use arrow keys to select and Enter to launch.",
+    "ja": "矢印キーで選択し、エンターキーで実行します。"
+  },
+  "segment_lib_02_01_ja_8016b9b7": {
+    "ko": "이",
+    "en": "",
+    "ja": "が"
+  },
+  "segment_lib_02_02_e4d32511": {
+    "ko": "첫 번째 항목,",
+    "en": " First item,",
+    "ja": "最初の項目、"
+  },
+  "segment_lib_02_03_ja_51ad43fa": {
+    "ko": "값으로 저장되었습니다",
+    "en": "saved to",
+    "ja": "に保存されました"
+  },
+  "segment_lib_03_00_54817723": {
+    "ko": "요청을 시작합니다.",
+    "en": "Starting request.",
+    "ja": "リクエストを開始します。"
+  },
+  "segment_lib_03_00_8bf0c480": {
+    "ko": "캐시 비우기에 실패했습니다",
+    "en": "Failed to clear cache",
+    "ja": "キャッシュのクリアに失敗しました"
+  },
+  "segment_lib_04_01_9614da6b": {
+    "ko": "이",
+    "en": "Two",
+    "ja": "に"
+  },
+  "segment_lib_04_03_362f813c": {
+    "ko": "값으로 저장되었습니다",
+    "en": "saved to",
+    "ja": "に保存されました"
+  },
+  "segment_lib_05_00_en_09d862f7": {
+    "ko": "저장에 실패했습니다.",
+    "en": "Failed to save ",
+    "ja": "保存に失敗しました "
+  },
+  "segment_lib_05_02_en_1b45c323": {
+    "ko": "설정",
+    "en": " settings",
+    "ja": " 設定"
+  }
+}

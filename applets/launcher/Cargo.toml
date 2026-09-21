@@ -1,0 +1,17 @@
+[package]
+name = "launcher"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+log.workspace = true
+sdk.workspace = true
+graphics.workspace = true
+views.workspace = true
+braille.workspace = true
+tossicat = "0.8"
+
+

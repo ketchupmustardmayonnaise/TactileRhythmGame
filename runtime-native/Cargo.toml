@@ -1,0 +1,33 @@
+[package]
+name = "runtime-native"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+bytes.workspace = true
+clap.workspace = true
+config.workspace = true
+crossbeam-channel.workspace = true
+crossterm.workspace = true
+directories.workspace = true
+get_if_addrs.workspace = true
+host-utils.workspace = true
+log.workspace = true
+postcard.workspace = true
+protocols.workspace = true
+reqwest.workspace = true
+runtime-common.workspace = true
+sdk = { workspace = true, features = ["host"] }
+serde_json.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio-serial.workspace = true
+tokio-stream.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true
+wasm-metadata.workspace = true
+wasmtime.workspace = true

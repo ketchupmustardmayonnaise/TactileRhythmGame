@@ -1,0 +1,11 @@
+[package]
+name = "views"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sdk = { workspace = true }
+tinyvec = { workspace = true, features = ["alloc"] }
+log = { workspace = true }
+graphics = { workspace = true }
+embedded-graphics = { workspace = true }

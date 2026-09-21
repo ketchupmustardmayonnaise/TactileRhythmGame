@@ -1,0 +1,29 @@
+[package]
+name = "audio-service"
+version = "0.1.0"
+edition = "2024"
+default-run = "audio-service"
+
+[dependencies]
+axum.workspace = true
+bytes.workspace = true
+cpal.workspace = true
+directories.workspace = true
+dotenvy.workspace = true
+rodio.workspace = true
+runtime-common = { version = "0.1.0", path = "../runtime-common" }
+sdk.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http = { version = "0.6.8", features = ["cors"] }
+tracing-subscriber.workspace = true
+tracing.workspace = true
+typed-builder.workspace = true
+regex = "1.12.3"
+serde_json.workspace = true
+pitch_shift.workspace = true
+mp3lame-encoder = "0.2.4"
+rayon = "1.10.0"
+piper-rs = "0.2.0"
+ort = "2.0.0-rc.12"

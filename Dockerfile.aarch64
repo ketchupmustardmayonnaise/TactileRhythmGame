@@ -1,0 +1,45 @@
+FROM debian:trixie-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 로캘 설정을 추가하여 언어 및 터미널 인코딩 관련 경고를 예방합니다.
+ENV LANG=en_US.UTF-8 \
+    LANGUAGE=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8
+
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    locales \
+    build-essential \
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
+    pkg-config \
+    libssl-dev \
+    libssl-dev:arm64 \
+    libasound2-dev:arm64 \
+    libpipewire-0.3-dev:arm64 \
+    libmp3lame-dev:arm64 \
+    libdbus-1-dev:arm64 \
+    clang \
+    ca-certificates \
+    curl \
+    git \
+    cmake && \
+    # en_US.UTF-8 로캘 생성 및 적용
+    sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
+    locale-gen && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    /root/.cargo/bin/rustup target add aarch64-unknown-linux-gnu
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+    CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+    PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig \
+    PKG_CONFIG_ALLOW_CROSS=1 \
+    CROSS_TOOLCHAIN_PREFIX=aarch64-linux-gnu-

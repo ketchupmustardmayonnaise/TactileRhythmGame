@@ -1,0 +1,14 @@
+[package]
+name = "device-manual"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+log.workspace = true
+sdk.workspace = true
+views.workspace = true
+widget.workspace = true
+braille.workspace = true

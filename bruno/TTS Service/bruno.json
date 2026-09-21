@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "TTS Service",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

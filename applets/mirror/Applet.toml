@@ -1,0 +1,15 @@
+priority = "High"
+hidden = true
+
+[category]
+ko = "시스템"
+en = "System"
+ja = "システム"
+
+[name]
+ko = "화면 미러링"
+en = "Screen Mirror"
+ja = "画面ミラー"
+
+[description]
+ko = "피씨의 화면을 미러링"

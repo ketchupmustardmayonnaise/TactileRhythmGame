@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+@layer components {
+    .panel-card {
+        @apply border rounded bg-white p-2;
+    }
+}

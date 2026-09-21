@@ -1,0 +1,11 @@
+[package]
+name = "applet-metadata-tool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+toml = { workspace = true }
+sdk = { path = "../../sdk", features = ["host"] }

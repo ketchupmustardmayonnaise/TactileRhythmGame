@@ -1,0 +1,30 @@
+priority = "High"
+hidden = false
+icon = """
+00000000000
+01111111110
+01000000010
+01011111010
+01000000010
+01011111010
+01000000010
+01011111010
+01111111110
+00000000000
+00000000000
+"""
+
+[category]
+ko = "시스템"
+en = "System"
+ja = "시스템"
+
+[name]
+ko = "장치 사용자 매뉴얼"
+en = "Device User Manual"
+ja = "デバイス取扱説明書"
+
+[description]
+ko = "멀티라인 점자 디스플레이 장치의 주요 기능 및 조작법 설명서"
+en = "User manual and key controls guide for the multiline braille display device."
+ja = "マルチライン点字ディスプレイの主要機能および操作ガイド"

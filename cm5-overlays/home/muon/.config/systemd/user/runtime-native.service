@@ -1,0 +1,14 @@
+[Unit]
+Description=DreamPad Runtime
+After=sound.target audio-service.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/setserial /dev/ttyAMA0 low_latency
+ExecStartPre=/bin/bash -c 'timeout 10 bash -c "until nc -z localhost 3005; do sleep 0.5; done" || true'
+ExecStartPre=/bin/bash -c '/usr/bin/amixer -c 0 sset Headphone 115'
+ExecStart=/home/muon/bin/runtime-native --device
+Restart=always
+
+[Install]
+WantedBy=default.target

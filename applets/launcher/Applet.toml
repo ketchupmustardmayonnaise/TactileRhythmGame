@@ -1,0 +1,15 @@
+priority = "Critical"
+hidden = true
+
+[category]
+ko = "시스템"
+en = "System"
+ja = "システム"
+
+[name]
+ko = "런처"
+en = "Launcher"
+ja = "ランチャー"
+
+[description]
+ko = "메인 홈 화면 및 앱 실행 런처"

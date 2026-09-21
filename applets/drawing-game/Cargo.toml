@@ -1,0 +1,17 @@
+[package]
+name = "drawing-game"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"] 
+
+[dependencies]
+bitflags.workspace = true
+graphics.workspace = true
+log.workspace = true
+sdk.workspace = true
+physics.workspace = true
+views.workspace = true
+tinyvec.workspace = true
+widget.workspace = true
