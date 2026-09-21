@@ -1,0 +1,17 @@
+[package]
+name = "rhythm-game"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"] # WASM 모듈 출력을 위한 필수 설정
+
+[dependencies]
+sdk = { path = "../../sdk" }
+
+# 필요 시 확장 라이브러리 추가
+graphics = { path = "../../extensions/graphics" }
+widget = { path = "../../extensions/widget" }
+
+# 디버그 로그(log::info! 등)를 호스트 콘솔로 보내기 위해 필요합니다.
+log = { workspace = true }

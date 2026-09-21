@@ -77,6 +77,12 @@ default:
 alias run-web := serve-runtime-web
 
 [no-cd]
+@serve-runtime-web-applet *ARGS:
+    just {{ if os() == "windows" { "windows" } else { "unix" } }}::serve-runtime-web-applet {{ ARGS }}
+
+alias run-web-applet := serve-runtime-web-applet
+
+[no-cd]
 @serve-audio-service *ARGS:
     just {{ if os() == "windows" { "windows" } else { "unix" } }}::serve-audio-service {{ ARGS }}
 

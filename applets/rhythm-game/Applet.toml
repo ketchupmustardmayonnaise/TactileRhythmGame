@@ -1,0 +1,32 @@
+priority = "Normal"
+hidden = false
+
+# 11행 x 11열 규격의 점자/픽셀 아이콘 (음표 모양)
+icon = """
+....#######
+....#.....#
+....#######
+....#......
+....#......
+....#......
+....#......
+..###......
+.####......
+.####......
+..###......
+"""
+
+[category]
+ko = "게임"
+en = "Game"
+ja = "ゲーム"
+
+[name]
+ko = "리듬 게임"
+en = "Rhythm Game"
+ja = "リズムゲーム"
+
+[description]
+ko = "판정선에 맞춰 노트를 누르는 3레인 리듬 게임"
+en = "A three-lane rhythm game: hit the notes on the judgement line"
+ja = "判定線に合わせてノートを押す3レーンのリズムゲーム"

@@ -28,9 +28,6 @@ struct AppletMetadata {
     category: LocalizedString,
 }
 
-
-
-
 fn normalize_and_validate_icon(icon: &str, applet_name: &str) -> Result<String> {
     if icon.trim().is_empty() {
         return Ok(String::new());
@@ -121,8 +118,7 @@ fn create_applet_toml_template(applet_dir: &std::path::Path) -> Result<()> {
     };
 
     let template = format!(
-        r#"category = "Utility"
-priority = "Normal"
+        r#"priority = "Normal"
 hidden = false
 icon = """
 ...#####...
@@ -137,6 +133,11 @@ icon = """
 .##.....##.
 ...#####...
 """
+
+[category]
+ko = "유틸리티"
+en = "Utility"
+ja = "ユーティリティ"
 
 [name]
 ko = "{}"

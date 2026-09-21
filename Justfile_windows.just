@@ -5,7 +5,7 @@ dist_bin_dir := "dist/bin"
 dist_applets_dir := "dist/applets"
 applets_source_dir := "applets"
 applets_dist_dir := "runtime-web/public/applets"
-applets := "analog-clock drawing-game graph dot-drawing launcher settings find-dot mirror cross-memory memo tetris audio-test tactile-display-demo network-test weather tactile-game tactile-test braille-test charter-of-national-education device-manual"
+applets := "analog-clock drawing-game graph dot-drawing launcher settings find-dot mirror cross-memory memo tetris audio-test tactile-display-demo network-test weather tactile-game tactile-test braille-test charter-of-national-education device-manual rhythm-game"
 cross_target_dir := "target-cross"
 
 # Show available recipes
@@ -29,7 +29,7 @@ _check-nodejs:
     @powershell -NoProfile -Command "if (-not (Get-Command npx -ErrorAction SilentlyContinue)) { Write-Host '❌ npx is not installed.'; exit 1 }"
 
 _install-trunk: _check-rust
-    @powershell -NoProfile -Command "if (-not (Get-Command trunk -ErrorAction SilentlyContinue)) { cargo install trunk }"
+    @powershell -NoProfile -Command "if (-not (Get-Command trunk -ErrorAction SilentlyContinue)) { cargo install trunk --locked }"
 
 _install-watchexec: _check-rust
     @powershell -NoProfile -Command "if (-not (Get-Command watchexec -ErrorAction SilentlyContinue)) { cargo install watchexec-cli }"
@@ -102,10 +102,18 @@ watch-runtime-native: _install-watchexec
     watchexec --watch runtime-native --exts rs -- just build-runtime-native-debug
 
 [group('⚙️ Applets & Runtime Development')]
-serve-runtime-web: _install-trunk build-applets
-    powershell -NoProfile -Command "Set-Location runtime-web; trunk serve"
+serve-runtime-web *ARGS: _install-trunk build-applets
+    powershell -NoProfile -Command "Set-Location runtime-web; trunk serve {{ARGS}}"
 
 alias run-web := serve-runtime-web
+
+# 애플릿 하나만 다시 빌드하고 웹 시뮬레이터를 띄웁니다.
+# 나머지 애플릿은 dist/applets 에 이미 빌드된 산출물을 그대로 재사용합니다.
+[group('⚙️ Applets & Runtime Development')]
+serve-runtime-web-applet applet *ARGS: _install-trunk (build-applet applet) refresh-applets
+    powershell -NoProfile -Command "Set-Location runtime-web; trunk serve {{ARGS}}"
+
+alias run-web-applet := serve-runtime-web-applet
 
 [group('⚙️ Applets & Runtime Development')]
 serve-audio-service: _check-rust
@@ -132,7 +140,7 @@ build-applets:
 
 [group('⚙️ Build (Release)')]
 refresh-applets: _install-jaq
-    powershell -NoProfile -Command "if (Test-Path '{{applets_dist_dir}}_tmp') { Remove-Item -Recurse -Force '{{applets_dist_dir}}_tmp' }; New-Item -ItemType Directory -Force -Path '{{applets_dist_dir}}_tmp' | Out-Null; Get-ChildItem -Path '{{dist_applets_dir}}\*.wasm' -ErrorAction SilentlyContinue | Copy-Item -Destination '{{applets_dist_dir}}_tmp\'; `$files = Get-ChildItem -Path '{{applets_dist_dir}}_tmp\*.wasm' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty BaseName; `$json = if (`$files) { if (`$files.Count -eq 1) { ('[\"' + `$files + '\"]') } else { `$files | ConvertTo-Json -Compress } } else { '[]' }; Set-Content -Path '{{applets_dist_dir}}_tmp/applets.json' -Value `$json; if (Test-Path '{{applets_dist_dir}}') { Remove-Item -Recurse -Force '{{applets_dist_dir}}' }; Move-Item -Path '{{applets_dist_dir}}_tmp' -Destination '{{applets_dist_dir}}'; Write-Host 'Generated {{applets_dist_dir}}/applets.json'"
+    powershell -NoProfile -Command "if (Test-Path '{{applets_dist_dir}}_tmp') { Remove-Item -Recurse -Force '{{applets_dist_dir}}_tmp' }; New-Item -ItemType Directory -Force -Path '{{applets_dist_dir}}_tmp' | Out-Null; Get-ChildItem -Path '{{dist_applets_dir}}\*.wasm' -ErrorAction SilentlyContinue | Copy-Item -Destination '{{applets_dist_dir}}_tmp'; `$files = @(Get-ChildItem -Path '{{applets_dist_dir}}_tmp\*.wasm' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty BaseName); `$json = '[' + ((`$files | ForEach-Object { `$_ | ConvertTo-Json -Compress }) -join ',') + ']'; Set-Content -Path '{{applets_dist_dir}}_tmp/applets.json' -Value `$json; if (Test-Path '{{applets_dist_dir}}') { Remove-Item -Recurse -Force '{{applets_dist_dir}}' }; Move-Item -Path '{{applets_dist_dir}}_tmp' -Destination '{{applets_dist_dir}}'; Write-Host 'Generated {{applets_dist_dir}}/applets.json'"
 
 [group('⚙️ Build (Release)')]
 build-runtime-native: _check-rust

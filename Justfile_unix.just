@@ -2,7 +2,7 @@ dist_bin_dir := "dist/bin"
 dist_applets_dir := "dist/applets"
 applets_source_dir := "applets"
 applets_dist_dir := "runtime-web/public/applets"
-applets := "analog-clock drawing-game graph dot-drawing launcher settings find-dot mirror cross-memory memo tetris audio-test tactile-display-demo network-test weather tactile-game tactile-test braille-test charter-of-national-education device-manual"
+applets := "analog-clock drawing-game graph dot-drawing launcher settings find-dot mirror cross-memory memo tetris audio-test tactile-display-demo network-test weather tactile-game tactile-test braille-test charter-of-national-education device-manual rhythm-game"
 cross_target_dir := "target-cross"
 
 export CMAKE_POLICY_VERSION_MINIMUM := "3.5"
@@ -43,7 +43,7 @@ _check-nodejs:
 _install-trunk: _check-rust
     @if ! command -v trunk > /dev/null; then \
         echo "trunk not found. Installing trunk..."; \
-        cargo install trunk; \
+        cargo install trunk --locked; \
     fi
 
 # Install watchexec-cli if not installed
@@ -150,10 +150,18 @@ watch-runtime-native: _install-watchexec
 
 # Watch and serve the Web runtime
 [group('⚙️ Applets & Runtime Development')]
-serve-runtime-web: _install-trunk build-applets
-    cd runtime-web && trunk serve
+serve-runtime-web *ARGS: _install-trunk build-applets
+    cd runtime-web && trunk serve {{ARGS}}
 
 alias run-web := serve-runtime-web
+
+# Rebuild a single applet and serve the Web runtime.
+# Other applets are reused from the existing dist/applets output.
+[group('⚙️ Applets & Runtime Development')]
+serve-runtime-web-applet applet *ARGS: _install-trunk (build-applet applet) refresh-applets
+    cd runtime-web && trunk serve {{ARGS}}
+
+alias run-web-applet := serve-runtime-web-applet
 
 # Watch and serve the TTS service
 [group('⚙️ Applets & Runtime Development')]
