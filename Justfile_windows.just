@@ -31,6 +31,13 @@ _check-nodejs:
 _install-trunk: _check-rust
     @powershell -NoProfile -Command "if (-not (Get-Command trunk -ErrorAction SilentlyContinue)) { cargo install trunk --locked }"
 
+_install-cargo-watch: _check-rust
+    @powershell -NoProfile -Command "if (-not (Get-Command cargo-watch -ErrorAction SilentlyContinue)) { cargo install cargo-watch --locked }"
+
+# audio-service 는 espeak-ng 를 소스에서 빌드하므로 libclang(LLVM)과 CMake 가 필요합니다.
+_check-audio-build-deps:
+    @$missing = @(); if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { $missing += 'CMake         -> winget install Kitware.CMake' }; if (-not $env:LIBCLANG_PATH -and -not (Test-Path 'C:\Program Files\LLVM\bin\libclang.dll') -and -not (Get-Command clang -ErrorAction SilentlyContinue)) { $missing += 'LLVM/libclang -> winget install LLVM.LLVM' }; if ($missing.Count -gt 0) { Write-Host 'audio-service 빌드에 필요한 도구가 없습니다:'; $missing | ForEach-Object { Write-Host ('  - ' + $_) }; Write-Host '설치 후 새 터미널에서 다시 실행하세요 (PATH 갱신 필요).'; exit 1 }
+
 _install-watchexec: _check-rust
     @powershell -NoProfile -Command "if (-not (Get-Command watchexec -ErrorAction SilentlyContinue)) { cargo install watchexec-cli }"
 
@@ -116,8 +123,13 @@ serve-runtime-web-applet applet *ARGS: _install-trunk (build-applet applet) refr
 alias run-web-applet := serve-runtime-web-applet
 
 [group('⚙️ Applets & Runtime Development')]
-serve-audio-service: _check-rust
-    powershell -NoProfile -Command "`$env:LIBCLANG_PATH='C:\Program Files\LLVM\bin'; `$env:BINDGEN_EXTRA_CLANG_ARGS='--target=x86_64-pc-windows-msvc'; `$env:PIPER_ESPEAKNG_DATA_DIRECTORY='C:\Program Files\eSpeak NG\espeak-ng-data'; `$env:TTS_ASSET_DIR='./assets'; `$env:RUST_LOG='info,audio_service=debug,ort=warn'; cargo watch --workdir audio-service -w src -w Cargo.toml -x 'run -p audio-service'"
+serve-audio-service: _check-rust _check-audio-build-deps _install-cargo-watch
+    powershell -NoProfile -Command "if (-not `$env:LIBCLANG_PATH -and (Test-Path 'C:\Program Files\LLVM\bin')) { `$env:LIBCLANG_PATH='C:\Program Files\LLVM\bin' }; if (-not `$env:PIPER_ESPEAKNG_DATA_DIRECTORY -and (Test-Path 'C:\Program Files\eSpeak NG\espeak-ng-data')) { `$env:PIPER_ESPEAKNG_DATA_DIRECTORY='C:\Program Files\eSpeak NG\espeak-ng-data' }; `$env:BINDGEN_EXTRA_CLANG_ARGS='--target=x86_64-pc-windows-msvc'; `$env:TTS_ASSET_DIR='./assets'; `$env:RUST_LOG='info,audio_service=debug,ort=warn'; cargo watch --workdir audio-service -w src -w Cargo.toml -x 'run -p audio-service'"
+
+# USB 로 연결된 기기의 IP 를 조회합니다. (scan / wifi <SSID> <PW> 하위 명령도 지원)
+[group('⚙️ PC Apps Development')]
+device-ip *ARGS: _check-rust
+    cargo run -q -p device-info -- {{ARGS}}
 
 [group('⚙️ PC Apps Development')]
 run-capture *ARGS: _check-rust
@@ -151,8 +163,8 @@ build-runtime-web: _install-trunk
     powershell -NoProfile -Command "Set-Location runtime-web; trunk build"
 
 [group('⚙️ Build (Release)')]
-build-audio-service: _check-rust
-    powershell -NoProfile -Command "`$env:LIBCLANG_PATH='C:\Program Files\LLVM\bin'; `$env:BINDGEN_EXTRA_CLANG_ARGS='--target=x86_64-pc-windows-msvc'; cargo build --package audio-service --release"
+build-audio-service: _check-rust _check-audio-build-deps
+    powershell -NoProfile -Command "if (-not `$env:LIBCLANG_PATH -and (Test-Path 'C:\Program Files\LLVM\bin')) { `$env:LIBCLANG_PATH='C:\Program Files\LLVM\bin' }; `$env:BINDGEN_EXTRA_CLANG_ARGS='--target=x86_64-pc-windows-msvc'; cargo build --package audio-service --release"
 
 [group('⚙️ Build (Release)')]
 build-capture: _check-rust

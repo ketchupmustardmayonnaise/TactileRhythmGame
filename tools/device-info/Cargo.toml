@@ -1,0 +1,11 @@
+[package]
+name = "device-info"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+host-utils = { workspace = true }
+protocols = { workspace = true }
+tokio = { workspace = true }

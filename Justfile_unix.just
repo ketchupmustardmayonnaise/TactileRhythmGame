@@ -31,6 +31,19 @@ _check-zig:
 _add-wasm-target: _check-rust
     rustup target add wasm32-unknown-unknown
 
+# Add aarch64-unknown-linux-gnu target (device cross build)
+_add-aarch64-target: _check-rust
+    rustup target add aarch64-unknown-linux-gnu
+
+# cross 는 컨테이너 안에서 빌드하므로 Docker(또는 Podman)가 실행 중이어야 합니다.
+_check-container-runtime:
+    @if ! command -v docker > /dev/null && ! command -v podman > /dev/null; then \
+        echo "❌ Docker(또는 Podman)가 없습니다. audio-service 의 aarch64 크로스 빌드에 필요합니다."; \
+        echo "   Windows: winget install Docker.DockerDesktop"; \
+        echo "   설치 후 Docker Desktop 을 실행한 상태로 다시 시도하세요."; \
+        exit 1; \
+    fi
+
 # Check for npx installation
 _check-nodejs:
     @if ! command -v npx > /dev/null; then \
@@ -47,6 +60,12 @@ _install-trunk: _check-rust
     fi
 
 # Install watchexec-cli if not installed
+_install-cargo-watch: _check-rust
+    @if ! command -v cargo-watch > /dev/null; then \
+        echo "cargo-watch not found. Installing cargo-watch..."; \
+        cargo install cargo-watch --locked; \
+    fi
+
 _install-watchexec: _check-rust
     @if ! command -v watchexec > /dev/null; then \
         echo "watchexec not found. Installing watchexec-cli..."; \
@@ -165,8 +184,13 @@ alias run-web-applet := serve-runtime-web-applet
 
 # Watch and serve the TTS service
 [group('⚙️ Applets & Runtime Development')]
-serve-audio-service: _check-rust
+serve-audio-service: _check-rust _install-cargo-watch
     TTS_ASSET_DIR=./assets RUST_LOG=info,audio_service=debug,ort=warn cargo watch --workdir audio-service -w src -w Cargo.toml -x "run -p audio-service"
+
+# Query the IP address of the USB-connected device (also: scan / wifi <SSID> <PW>)
+[group('⚙️ PC Apps Development')]
+device-ip *ARGS: _check-rust
+    cargo run -q -p device-info -- {{ARGS}}
 
 # Run capture app
 [group('⚙️ PC Apps Development')]
@@ -228,7 +252,7 @@ build-runtime-native: _check-rust
 
 # 네이티브 런타임 빌드 (릴리즈, aarch64 크로스 컴파일)
 [group('⚙️ Build (Release)')]
-build-runtime-native-aarch64: _check-rust _check-zig
+build-runtime-native-aarch64: _check-rust _check-zig _add-aarch64-target
     ulimit -n 65536 2>/dev/null || true; \
     cargo zigbuild --package runtime-native --release --target aarch64-unknown-linux-gnu && \
     mkdir -p "{{dist_bin_dir}}" && \
@@ -246,7 +270,7 @@ build-audio-service: _check-rust
 
 # Build the Audio service (Release, aarch64)
 [group('⚙️ Build (Release)')]
-build-audio-service-aarch64: _check-rust _install-cross
+build-audio-service-aarch64: _check-rust _check-container-runtime _install-cross
     ulimit -n 65536 2>/dev/null || true; \
     XDG_CACHE_HOME=/target/cache \
     CARGO_TARGET_DIR={{cross_target_dir}} \
@@ -272,7 +296,7 @@ dist-build: build-applets build-runtime-native-aarch64 build-audio-service-aarch
 [group('⚙️ Deploy (Release)')]
 deploy: build-applets build-runtime-native-aarch64 build-audio-service-aarch64
     ulimit -n 65536 2>/dev/null || true
-    . device-env.sh && \
+    . ./device-env.sh && \
     ssh $DEVICE_HOST "mkdir -p ~/bin ~/.local/share/runtime/applets ~/audio-service/assets" && \
     ssh $DEVICE_HOST "systemctl --user stop runtime-native.service; systemctl --user stop audio-service.service" && \
     scp target/aarch64-unknown-linux-gnu/release/runtime-native {{cross_target_dir}}/aarch64-unknown-linux-gnu/release/audio-service $DEVICE_HOST:bin/ && \
@@ -281,32 +305,32 @@ deploy: build-applets build-runtime-native-aarch64 build-audio-service-aarch64
 
 [group('⚙️ Deploy (Release)')]
 deploy-services:
-    . device-env.sh && \
+    . ./device-env.sh && \
     scp cm5-overlays/home/muon/.config/systemd/user/{audio-service,runtime-native}.service $DEVICE_HOST:.config/systemd/user/ && \
     ssh $DEVICE_HOST "systemctl --user daemon-reload && systemctl --user enable runtime-native.service audio-service.service"
 
 [group('⚙️ Deploy (Release)')]
 deploy-applets: build-applets
-    . device-env.sh && \
+    . ./device-env.sh && \
     ssh $DEVICE_HOST "mkdir -p ~/.local/share/runtime/applets" && \
     scp -r {{dist_applets_dir}}/*.wasm $DEVICE_HOST:.local/share/runtime/applets
 
 [group('⚙️ Deploy (Release)')]
 deploy-assets:
-    . device-env.sh && \
+    . ./device-env.sh && \
     ssh $DEVICE_HOST "mkdir -p ~/audio-service/assets" && \
     scp -r audio-service/assets/* $DEVICE_HOST:audio-service/assets/
 
 [group('⚙️ Deploy (Release)')]
 debug-audio: build-audio-service-aarch64
-    . device-env.sh && \
+    . ./device-env.sh && \
     ssh $DEVICE_HOST "systemctl --user stop audio-service.service" && \
     scp {{cross_target_dir}}/aarch64-unknown-linux-gnu/release/audio-service $DEVICE_HOST:bin/ && \
     ssh -t $DEVICE_HOST "RUST_LOG=info,audio-service=debug,ort=warn TTS_ASSET_DIR=~/audio-service/assets PIPER_ESPEAKNG_DATA_DIRECTORY=/usr/lib/aarch64-linux-gnu ~/bin/audio-service"
 
 [group('⚙️ Deploy (Release)')]
 debug-runtime *ARGS: build-runtime-native-aarch64
-    . device-env.sh && \
+    . ./device-env.sh && \
     ssh $DEVICE_HOST "systemctl --user stop runtime-native.service" && \
     ssh $DEVICE_HOST "killall runtime-native; true" && \
     scp target/aarch64-unknown-linux-gnu/release/runtime-native $DEVICE_HOST:bin/ && \

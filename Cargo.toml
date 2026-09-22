@@ -17,6 +17,7 @@ members = [
     "runtime-web",
     "sdk",
     "tools/applet-metadata-tool",
+    "tools/device-info",
 ]
 exclude = [
     "firmware",

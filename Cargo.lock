@@ -1856,6 +1856,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "device-info"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "host-utils",
+ "protocols",
+ "tokio",
+]
+
+[[package]]
 name = "device-manual"
 version = "0.1.0"
 dependencies = [
@@ -6615,6 +6626,8 @@ dependencies = [
  "graphics",
  "log",
  "sdk",
+ "serde",
+ "serde_json",
  "widget",
 ]
 

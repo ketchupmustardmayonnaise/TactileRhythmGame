@@ -67,6 +67,10 @@ default:
     just {{ if os() == "windows" { "windows" } else { "unix" } }}::run-applet {{ ARGS }}
 
 [no-cd]
+@device-ip *ARGS:
+    just {{ if os() == "windows" { "windows" } else { "unix" } }}::device-ip {{ ARGS }}
+
+[no-cd]
 @run-capture *ARGS:
     just {{ if os() == "windows" { "windows" } else { "unix" } }}::run-capture {{ ARGS }}
 

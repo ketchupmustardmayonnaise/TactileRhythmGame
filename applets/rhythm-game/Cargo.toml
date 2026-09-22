@@ -15,3 +15,7 @@ widget = { path = "../../extensions/widget" }
 
 # 디버그 로그(log::info! 등)를 호스트 콘솔로 보내기 위해 필요합니다.
 log = { workspace = true }
+
+# src/audio/*.json 채보 파일 파싱용
+serde = { workspace = true }
+serde_json = { workspace = true }
