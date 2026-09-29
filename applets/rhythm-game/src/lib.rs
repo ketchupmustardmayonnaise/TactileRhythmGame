@@ -10,8 +10,9 @@
 //! 3. 노트마다 `예고 시간` 동안 원이 진동하며, 그 끝에서 가운데 키(`Space`)를 누릅니다.
 //! 4. 기능 키(`E`)를 누르면 진동 방식 두 가지가 번갈아 전환되고, 바뀐 방식을 음성으로 알려 줍니다.
 //!
-//! 채보는 `src/audio/*.json` 에서 읽습니다. `meta.seconds_per_beat` 이 예고 시간이고,
-//! 예고는 항상 노트 시각 *이전에* 시작합니다. (노트 1.465초, 예고 0.3초 → 1.165초부터 진동)
+//! 채보는 `src/audio/*.json` 에서 읽습니다. `meta.seconds_per_beat` 이 예고 시간의 기본값이고,
+//! `LEAD_OVERRIDE_MS` 로 덮어쓸 수 있습니다. 예고는 항상 노트 시각 *이전에* 시작합니다.
+//! (노트 1.465초, 예고 150ms → 1.315초부터 진동)
 
 use std::time::Duration;
 
@@ -94,19 +95,60 @@ const SILENCE: &[u8] = include_bytes!("audio/silence.mp3");
 
 /// 음악 재생 요청 ~ 실제 소리가 나기까지의 지연 보정값(ms).
 ///
-/// 정적 오디오는 audio-service 를 거쳐 재생되므로 환경마다 지연이 다릅니다.
-/// 박자가 일정하게 밀리거나 당겨지면 이 값을 조정하세요. (양수 = 판정을 늦춤)
+/// 정적 오디오는 audio-service 로 HTTP 요청을 보낸 뒤 디코딩·리샘플링을 거쳐 재생되므로,
+/// `context.audio.play()` 를 호출한 시점과 실제로 소리가 나는 시점 사이에 지연이 있습니다.
+/// 게임 시계는 호출 시점부터 도므로 그만큼 **게임이 음악보다 앞서갑니다.**
+///
+/// `now_s = 경과시간 + AUDIO_OFFSET_MS/1000` 이므로 부호는 다음과 같습니다.
+/// * **음수** — 게임을 그만큼 늦춥니다. 음악이 늦게 시작되는 보통의 경우에 씁니다.
+/// * **양수** — 게임을 그만큼 당깁니다.
+///
+/// 판정이 곡 내내 일정하게 한쪽으로 쏠릴 때만 이 값으로 맞추세요.
+/// 곡이 진행될수록 점점 어긋난다면 그건 오프셋 문제가 아니라 리샘플링 드리프트입니다.
+/// (`audio-service/src/audio/format.rs` 의 `resample_linear` 참고)
 const AUDIO_OFFSET_MS: i64 = 0;
 
-/// Perfect 판정 허용 오차(초)
-const PERFECT_S: f32 = 0.10;
-/// Good 판정 허용 오차(초)
-const GOOD_S: f32 = 0.22;
-/// 이 시간이 지나도록 누르지 않으면 Miss 처리합니다.
-const MISS_S: f32 = 0.30;
+/// 판정 단계 정의. **이 표 하나가 판정에 관한 유일한 기준입니다.**
+///
+/// 각 항목은 `(판정, 허용 오차(초), 점수)` 이며, 오차가 작은 것부터 차례로 검사합니다.
+/// 허용 오차는 노트 시각을 기준으로 **앞뒤 양쪽**에 적용됩니다.
+/// (Perfect 0.10 이면 -100ms ~ +100ms)
+///
+/// 단계를 추가·삭제하거나 점수를 바꾸려면 이 표만 고치면 됩니다.
+/// 아래 것들이 전부 여기서 파생됩니다.
+/// * 어떤 판정을 받는지 (`Judge::from_error`)
+/// * 점수 (`Judge::score`)
+/// * 칠 수 있는 한계 시각 (`HIT_WINDOW_S`)
+/// * 정확도 계산 (`RhythmGame::accuracy`)
+///
+/// Miss 는 "표의 어디에도 못 든 경우"라서 표에 넣지 않습니다.
+const HIT_TIERS: [(Judge, f32, u32); 2] = [(Judge::Perfect, 0.20, 100), (Judge::Good, 0.40, 50)];
+
+/// 노트를 칠 수 있는 마지막 경계(초) = 표의 가장 너그러운 허용 오차.
+///
+/// 이 시간을 넘기면 누르든 말든 Miss 입니다. 예전에는 "칠 수 있는 한계(0.22초)"와
+/// "Miss 로 확정하는 시각(0.30초)"이 따로 있어서, 그 사이 80ms 동안 눌러도
+/// 아무 반응이 없는 사각지대가 있었습니다. 지금은 하나로 통일했습니다.
+const HIT_WINDOW_S: f32 = HIT_TIERS[HIT_TIERS.len() - 1].1;
 
 /// 예고 시간을 읽지 못했을 때 사용할 기본값(초)
 const DEFAULT_LEAD_S: f32 = 0.3;
+
+/// 노트 예고 시간을 코드에서 직접 지정합니다.
+///
+/// `None` 이면 채보의 `meta.seconds_per_beat`(현재 0.3초)를 그대로 씁니다.
+/// 예고가 짧을수록 촉각 신호가 날카로워지지만, 그만큼 표현할 수 있는 단계가 줄어듭니다.
+///
+/// | 예고 | 8단계 한 칸 | 비고 |
+/// |---|---|---|
+/// | 300ms | 37.5ms | 채보 기본값 |
+/// | 200ms | 25.0ms | |
+/// | 150ms | 18.8ms | 현재 값 |
+/// | 100ms | 12.5ms | PWM 반송파(16ms)보다 짧아 단계 구분이 어려움 |
+///
+/// `VibrationMode::HardwareSteps` 는 200ms 아래에서는 제 기능을 못 합니다.
+/// 느린 단계(1·2·4·8Hz)의 한 주기가 각 칸보다 길어서 켜짐/꺼짐이 한 번도 안 일어납니다.
+const LEAD_OVERRIDE_MS: Option<u32> = Some(150);
 
 // ---------------------------------------------------------------------------
 // 곡 에셋
@@ -157,6 +199,8 @@ struct Song {
     lead: f32,
     /// 노트 시각(초). 오름차순으로 정렬되어 있습니다.
     notes: Vec<f32>,
+    /// mp3 헤더에서 계산한 실제 재생 길이(초). 파싱에 실패하면 `None`.
+    audio_secs: Option<f32>,
 }
 
 impl Song {
@@ -168,9 +212,101 @@ impl Song {
         }
     }
 
-    /// 곡의 전체 길이(마지막 노트 + 여유)입니다. 진행 막대 계산에 씁니다.
-    fn duration(&self) -> f32 {
-        self.notes.last().copied().unwrap_or(0.0) + 2.0
+    /// 결과 화면으로 넘어가는 시각(초)입니다.
+    ///
+    /// **음악을 중간에 끊지 않고 끝까지 들려준 뒤** 결과를 알려 주기 위해,
+    /// mp3 의 실제 재생 길이를 기준으로 삼습니다.
+    /// 헤더를 읽지 못했을 때만 마지막 노트 + 여유 시간으로 대체합니다.
+    /// 진행 막대의 기준 길이이기도 합니다.
+    fn end_secs(&self) -> f32 {
+        let after_last_note = self.notes.last().copied().unwrap_or(0.0) + HIT_WINDOW_S;
+        match self.audio_secs {
+            // 채보가 음원보다 길게 잡혀 있어도 마지막 노트 판정은 끝내고 넘어갑니다.
+            Some(secs) => secs.max(after_last_note),
+            None => after_last_note + 2.0,
+        }
+    }
+}
+
+/// MP3 프레임 헤더를 훑어 실제 재생 길이(초)를 계산합니다.
+///
+/// 재생이 끝나는 시점을 알려 주는 API 가 SDK 에 없어서(오디오 완료 이벤트가 애플릿까지
+/// 전달되지 않습니다) 음원 길이를 직접 구합니다. CBR/VBR 모두 프레임 단위로 합산하므로
+/// 나중에 어떤 mp3 를 넣어도 동작합니다.
+fn mp3_duration_secs(data: &[u8]) -> Option<f32> {
+    // Layer III 비트레이트 표 (kbps)
+    const V1_L3: [u32; 16] = [
+        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+    ];
+    const V2_L3: [u32; 16] = [
+        0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+    ];
+    // [MPEG1, MPEG2, MPEG2.5] × 샘플레이트 인덱스
+    const RATES: [[u32; 3]; 3] = [
+        [44100, 48000, 32000],
+        [22050, 24000, 16000],
+        [11025, 12000, 8000],
+    ];
+
+    let mut i = 0usize;
+
+    // ID3v2 태그는 동기워드처럼 보이는 바이트를 품을 수 있으므로 통째로 건너뜁니다.
+    if data.len() > 10 && &data[..3] == b"ID3" {
+        let size = (((data[6] & 0x7f) as usize) << 21)
+            | (((data[7] & 0x7f) as usize) << 14)
+            | (((data[8] & 0x7f) as usize) << 7)
+            | ((data[9] & 0x7f) as usize);
+        i = 10 + size;
+    }
+
+    let mut total_samples: u64 = 0;
+    let mut rate_hz: u32 = 0;
+
+    while i + 4 <= data.len() {
+        // 프레임 동기워드(11비트 전부 1)를 찾습니다.
+        if data[i] != 0xFF || (data[i + 1] & 0xE0) != 0xE0 {
+            i += 1;
+            continue;
+        }
+
+        let ver = (data[i + 1] >> 3) & 0x03; // 3=MPEG1, 2=MPEG2, 0=MPEG2.5, 1=예약
+        let layer = (data[i + 1] >> 1) & 0x03; // 1 = Layer III
+        let br_idx = ((data[i + 2] >> 4) & 0x0F) as usize;
+        let sr_idx = ((data[i + 2] >> 2) & 0x03) as usize;
+        let pad = ((data[i + 2] >> 1) & 0x01) as usize;
+
+        if layer != 1 || ver == 1 || sr_idx == 3 || br_idx == 0 || br_idx == 15 {
+            i += 1;
+            continue;
+        }
+
+        let ver_row = match ver {
+            3 => 0,
+            2 => 1,
+            _ => 2,
+        };
+        let rate = RATES[ver_row][sr_idx];
+        let bitrate = if ver == 3 {
+            V1_L3[br_idx]
+        } else {
+            V2_L3[br_idx]
+        } * 1000;
+        let samples_per_frame: u32 = if ver == 3 { 1152 } else { 576 };
+        let frame_len = (samples_per_frame as usize / 8) * bitrate as usize / rate as usize + pad;
+        if frame_len == 0 {
+            i += 1;
+            continue;
+        }
+
+        total_samples += samples_per_frame as u64;
+        rate_hz = rate;
+        i += frame_len;
+    }
+
+    if rate_hz == 0 || total_samples == 0 {
+        None
+    } else {
+        Some(total_samples as f32 / rate_hz as f32)
     }
 }
 
@@ -195,11 +331,20 @@ fn load_songs() -> Vec<Song> {
                     let mut notes: Vec<f32> = chart.notes.iter().map(|n| n.time).collect();
                     notes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
+                    let audio_secs = mp3_duration_secs(asset.audio);
+                    if audio_secs.is_none() {
+                        log::warn!(
+                            "{}: mp3 길이를 읽지 못했습니다. 마지막 노트 기준으로 종료합니다.",
+                            asset.title[1]
+                        );
+                    }
+
                     log::info!(
-                        "{}: 노트 {}개, 예고 {}초",
+                        "{}: 노트 {}개, 예고 {}초, 음원 {:?}초",
                         asset.title[1],
                         notes.len(),
-                        lead
+                        lead,
+                        audio_secs
                     );
 
                     Some(Song {
@@ -207,6 +352,7 @@ fn load_songs() -> Vec<Song> {
                         audio: asset.audio,
                         lead,
                         notes,
+                        audio_secs,
                     })
                 }
                 Err(e) => {
@@ -230,12 +376,55 @@ enum Judge {
 }
 
 impl Judge {
+    /// 노트 시각과의 오차(초, 절댓값)로 판정을 결정합니다.
+    /// 어느 단계에도 못 들면 `None` — 헛손질이라 판정 자체를 하지 않습니다.
+    fn from_error(error_secs: f32) -> Option<Judge> {
+        HIT_TIERS
+            .iter()
+            .find(|(_, tolerance, _)| error_secs <= *tolerance)
+            .map(|(judge, _, _)| *judge)
+    }
+
+    /// 이 판정을 받기 위한 최대 오차(초). Miss 는 경계가 없으므로 `None`.
+    /// 게임 로직은 `from_error` 만 쓰므로, 표를 검증하는 테스트에서만 필요합니다.
+    #[cfg(test)]
+    fn tolerance(self) -> Option<f32> {
+        HIT_TIERS
+            .iter()
+            .find(|(judge, _, _)| *judge == self)
+            .map(|(_, tolerance, _)| *tolerance)
+    }
+
     fn score(self) -> u32 {
+        HIT_TIERS
+            .iter()
+            .find(|(judge, _, _)| *judge == self)
+            .map(|(_, _, score)| *score)
+            .unwrap_or(0)
+    }
+
+    /// 콤보가 이어지는 판정인지 여부입니다.
+    fn keeps_combo(self) -> bool {
+        self != Judge::Miss
+    }
+
+    /// 판정 직후 화면 맨 윗줄에 그릴 막대의 가로 비율입니다.
+    /// 소리를 못 듣는 상황에서도 방금 판정을 눈으로 구분할 수 있게 합니다.
+    fn flash_ratio(self) -> f32 {
         match self {
-            Judge::Perfect => 100,
-            Judge::Good => 50,
-            Judge::Miss => 0,
+            Judge::Perfect => 1.0,
+            Judge::Good => 0.5,
+            Judge::Miss => 1.0 / 6.0,
         }
+    }
+
+    /// 가장 좋은 판정의 점수. 정확도 계산의 분모로 씁니다.
+    fn best_score() -> u32 {
+        HIT_TIERS
+            .iter()
+            .map(|(_, _, score)| *score)
+            .max()
+            .unwrap_or(1)
     }
 }
 
@@ -316,9 +505,13 @@ impl RhythmGame {
         self.songs.get(self.selected)
     }
 
-    /// 예고 시간(초)
+    /// 실제로 적용되는 예고 시간(초)입니다.
+    /// `LEAD_OVERRIDE_MS` 가 설정되어 있으면 채보 값보다 우선합니다.
     fn lead(&self) -> f32 {
-        self.song().map(|s| s.lead).unwrap_or(DEFAULT_LEAD_S)
+        match LEAD_OVERRIDE_MS {
+            Some(ms) => ms as f32 / 1000.0,
+            None => self.song().map(|s| s.lead).unwrap_or(DEFAULT_LEAD_S),
+        }
     }
 
     /// 아직 치지 않은 다음 노트의 시각(초)
@@ -365,18 +558,14 @@ impl RhythmGame {
 
     fn apply_judge(&mut self, judge: Judge) {
         match judge {
-            Judge::Perfect => {
-                self.perfect += 1;
-                self.combo += 1;
-            }
-            Judge::Good => {
-                self.good += 1;
-                self.combo += 1;
-            }
-            Judge::Miss => {
-                self.miss += 1;
-                self.combo = 0;
-            }
+            Judge::Perfect => self.perfect += 1,
+            Judge::Good => self.good += 1,
+            Judge::Miss => self.miss += 1,
+        }
+        if judge.keeps_combo() {
+            self.combo += 1;
+        } else {
+            self.combo = 0;
         }
         self.max_combo = self.max_combo.max(self.combo);
         self.score += judge.score();
@@ -398,24 +587,30 @@ impl RhythmGame {
             return;
         };
 
-        let diff = (target - self.now_s).abs();
-        if diff > GOOD_S {
+        let error = (target - self.now_s).abs();
+        let Some(judge) = Judge::from_error(error) else {
             // 아직 예고조차 시작되지 않았거나 이미 놓친 노트 — 헛손질은 감점 없이 무시합니다.
             return;
-        }
+        };
 
         self.next_note += 1;
-        self.apply_judge(if diff <= PERFECT_S {
-            Judge::Perfect
-        } else {
-            Judge::Good
-        });
+        self.apply_judge(judge);
+    }
+
+    /// 결과 화면으로 넘어갈 때가 되었는지 판단합니다.
+    ///
+    /// 마지막 노트를 판정했더라도 **음악이 끝날 때까지 기다립니다.**
+    /// 곡을 중간에 잘라내지 않고 끝까지 들려준 뒤 결과를 알려 주기 위해서입니다.
+    fn is_finished(&self) -> bool {
+        self.song()
+            .map(|s| self.next_note >= s.notes.len() && self.now_s >= s.end_secs())
+            .unwrap_or(true)
     }
 
     /// 판정 시간을 넘긴 노트를 Miss 처리합니다.
     fn reap_missed_notes(&mut self) {
         while let Some(target) = self.upcoming_note() {
-            if self.now_s - target <= MISS_S {
+            if self.now_s - target <= HIT_WINDOW_S {
                 break;
             }
             self.next_note += 1;
@@ -425,7 +620,7 @@ impl RhythmGame {
 
     /// 현재 시각에서 원을 어떤 강도로 채울지 계산합니다.
     ///
-    /// 예고 구간은 `[T - lead, T]` 이며, 판정이 끝나는 `T + GOOD_S` 까지 최고조를 유지합니다.
+    /// 예고 구간은 `[T - lead, T]` 이며, 판정이 끝나는 `T + HIT_WINDOW_S` 까지 최고조를 유지합니다.
     fn vibration_fill(&self) -> Intensity {
         self.vibration_fill_with(self.vibration_mode)
     }
@@ -456,7 +651,7 @@ impl RhythmGame {
 
         // 예고 시작 이후 경과한 시간
         let since_start = self.now_s - (target - lead);
-        if since_start < 0.0 || self.now_s > target + GOOD_S {
+        if since_start < 0.0 || self.now_s > target + HIT_WINDOW_S {
             return Intensity::OFF;
         }
         let progress = (since_start / lead).clamp(0.0, 1.0);
@@ -483,7 +678,7 @@ impl RhythmGame {
     fn compute_visual(&self, width: i16) -> Visual {
         match self.state {
             GameState::Playing => {
-                let total = self.song().map(|s| s.duration()).unwrap_or(1.0).max(0.001);
+                let total = self.song().map(|s| s.end_secs()).unwrap_or(1.0).max(0.001);
                 Visual {
                     fill: self.vibration_fill(),
                     progress_px: ((self.now_s / total).clamp(0.0, 1.0) * width as f32) as i16,
@@ -499,13 +694,15 @@ impl RhythmGame {
         (size.width.min(size.height) - 8).clamp(6, 40)
     }
 
+    /// 정확도 = 실제로 얻은 점수 / 전부 최고 판정이었을 때의 점수.
+    /// 점수표(`HIT_TIERS`)에서 파생되므로 단계를 바꿔도 따로 고칠 필요가 없습니다.
     fn accuracy(&self) -> f32 {
-        let total = self.perfect + self.good + self.miss;
-        if total == 0 {
-            0.0
-        } else {
-            (self.perfect * 2 + self.good) as f32 / (total * 2) as f32
+        let judged = self.perfect + self.good + self.miss;
+        if judged == 0 {
+            return 0.0;
         }
+        let best = judged * Judge::best_score();
+        self.score as f32 / best as f32
     }
 }
 
@@ -601,14 +798,8 @@ impl Applet for RhythmGame {
                 now.saturating_sub(self.started_at).as_secs_f32() + AUDIO_OFFSET_MS as f32 / 1000.0;
             self.reap_missed_notes();
 
-            let finished = self
-                .song()
-                .map(|s| self.next_note >= s.notes.len() && self.now_s > s.duration())
-                .unwrap_or(true);
-            if finished {
-                // 채보가 끝나도 mp3 뒷부분이 남아 있을 수 있습니다.
-                // 결과 음성과 겹치지 않도록 여기서 음악을 끊습니다.
-                self.stop_music(context);
+            if self.is_finished() {
+                // 음악이 자연스럽게 끝난 뒤이므로 따로 끊지 않습니다.
                 self.state = GameState::Result;
                 needs_redraw = true;
                 log::info!(
@@ -689,11 +880,7 @@ impl Applet for RhythmGame {
                 if self.visual.flash
                     && let Some(judge) = self.last_judge
                 {
-                    let len = match judge {
-                        Judge::Perfect => size.width,
-                        Judge::Good => size.width / 2,
-                        Judge::Miss => size.width / 6,
-                    };
+                    let len = (size.width as f32 * judge.flash_ratio()) as i16;
                     canvas.draw_line(
                         Point::new(0, 0),
                         Point::new(len.max(1) - 1, 0),
@@ -808,6 +995,178 @@ mod tests {
         game
     }
 
+    /// 판정표 자체가 앞뒤가 맞는지 — 오차는 커지고 점수는 작아지는 순서여야 합니다.
+    #[test]
+    fn judge_tiers_are_consistent() {
+        assert!(!HIT_TIERS.is_empty());
+        for pair in HIT_TIERS.windows(2) {
+            let (a_judge, a_tol, a_score) = pair[0];
+            let (b_judge, b_tol, b_score) = pair[1];
+            assert!(
+                a_tol < b_tol,
+                "{a_judge:?}({a_tol}) 가 {b_judge:?}({b_tol}) 보다 너그럽습니다"
+            );
+            assert!(
+                a_score > b_score,
+                "{a_judge:?}({a_score}점) 이 {b_judge:?}({b_score}점) 보다 낮습니다"
+            );
+        }
+        assert!(
+            HIT_TIERS.iter().all(|(judge, _, _)| *judge != Judge::Miss),
+            "Miss 는 표에 들어가면 안 됩니다"
+        );
+        assert_eq!(
+            HIT_WINDOW_S,
+            HIT_TIERS[HIT_TIERS.len() - 1].1,
+            "칠 수 있는 한계는 표의 가장 너그러운 값이어야 합니다"
+        );
+        assert_eq!(Judge::Miss.score(), 0);
+        assert_eq!(Judge::Miss.tolerance(), None);
+        assert!(!Judge::Miss.keeps_combo());
+    }
+
+    /// 각 단계의 경계에서 판정이 정확히 갈리는지 확인합니다.
+    #[test]
+    fn judge_boundaries() {
+        let perfect = Judge::Perfect.tolerance().unwrap();
+        let good = Judge::Good.tolerance().unwrap();
+
+        assert_eq!(Judge::from_error(0.0), Some(Judge::Perfect));
+        assert_eq!(
+            Judge::from_error(perfect),
+            Some(Judge::Perfect),
+            "경계 포함"
+        );
+        assert_eq!(Judge::from_error(perfect + 0.001), Some(Judge::Good));
+        assert_eq!(Judge::from_error(good), Some(Judge::Good), "경계 포함");
+        assert_eq!(
+            Judge::from_error(good + 0.001),
+            None,
+            "한계를 넘으면 판정 없음"
+        );
+    }
+
+    /// 예전에 있던 사각지대(칠 수 있는 한계 ~ Miss 확정 시각 사이)가 사라졌는지 확인합니다.
+    /// 칠 수 있는 경계를 넘긴 노트는 그 즉시 Miss 로 확정되어야 합니다.
+    #[test]
+    fn no_dead_zone_after_the_hit_window() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+
+        // 경계 바로 안쪽: 아직 Miss 가 아니고, 누르면 판정이 됩니다.
+        game.now_s = target + HIT_WINDOW_S - 0.001;
+        game.reap_missed_notes();
+        assert_eq!(game.miss, 0, "아직 칠 수 있는 시점입니다");
+        game.on_hit();
+        assert_eq!(game.good, 1, "경계 안쪽이므로 Good 이어야 합니다");
+
+        // 다음 노트를 경계 바로 바깥으로 넘겨 봅니다.
+        let second = game.song().unwrap().notes[1];
+        game.now_s = second + HIT_WINDOW_S + 0.001;
+        game.on_hit();
+        assert_eq!(game.good, 1, "한계를 넘긴 입력은 무시되어야 합니다");
+        game.reap_missed_notes();
+        assert_eq!(game.miss, 1, "같은 시점에 Miss 로 확정되어야 합니다");
+    }
+
+    /// 정확도가 점수표와 일치해야 합니다.
+    #[test]
+    fn accuracy_follows_the_score_table() {
+        let mut game = loaded_game();
+
+        game.perfect = 10;
+        game.score = 10 * Judge::Perfect.score();
+        assert!((game.accuracy() - 1.0).abs() < 1e-6, "전부 Perfect 면 100%");
+
+        game = loaded_game();
+        game.miss = 10;
+        game.score = 0;
+        assert!((game.accuracy() - 0.0).abs() < 1e-6, "전부 Miss 면 0%");
+
+        game = loaded_game();
+        game.good = 10;
+        game.score = 10 * Judge::Good.score();
+        let expected = Judge::Good.score() as f32 / Judge::Perfect.score() as f32;
+        assert!(
+            (game.accuracy() - expected).abs() < 1e-6,
+            "전부 Good 이면 {expected}, 실제 {}",
+            game.accuracy()
+        );
+    }
+
+    /// `LEAD_OVERRIDE_MS` 가 채보의 `seconds_per_beat` 보다 우선 적용되어야 합니다.
+    #[test]
+    fn lead_override_wins_over_the_chart() {
+        let game = loaded_game();
+        let chart_lead = game.song().unwrap().lead;
+        assert_eq!(chart_lead, 0.3, "채보 원본 값은 그대로 보존되어야 합니다");
+
+        match LEAD_OVERRIDE_MS {
+            Some(ms) => {
+                let expected = ms as f32 / 1000.0;
+                assert!(
+                    (game.lead() - expected).abs() < 1e-6,
+                    "예고 시간이 {expected}초여야 하는데 {}초입니다",
+                    game.lead()
+                );
+                assert!(
+                    (0.05..=0.30).contains(&game.lead()),
+                    "예고 시간이 상식적인 범위를 벗어났습니다: {}초",
+                    game.lead()
+                );
+            }
+            None => assert_eq!(game.lead(), chart_lead),
+        }
+    }
+
+    /// mp3 헤더에서 실제 재생 길이를 읽어야 합니다.
+    /// (파이썬으로 프레임을 세어 확인한 값: 44.1kHz, 2170 프레임, 56.686초)
+    #[test]
+    fn mp3_duration_is_parsed() {
+        let secs = mp3_duration_secs(SONG_ASSETS[0].audio).expect("mp3 길이를 읽지 못했습니다");
+        assert!(
+            (secs - 56.686).abs() < 0.05,
+            "mp3 길이가 예상과 다릅니다: {secs}초"
+        );
+    }
+
+    /// 마지막 노트(50.311초)가 지나도 음악이 끝나는 56.686초까지는 결과로 넘어가면 안 됩니다.
+    #[test]
+    fn result_waits_for_the_music_to_end() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+
+        let last_note = *game.song().unwrap().notes.last().unwrap();
+        let end = game.song().unwrap().end_secs();
+        assert!(
+            end > last_note + 1.0,
+            "음원 길이가 아니라 마지막 노트 기준으로 끝나고 있습니다 (end={end}, last={last_note})"
+        );
+
+        // 모든 노트를 판정한 상태로 만듭니다.
+        game.next_note = game.song().unwrap().notes.len();
+
+        game.now_s = last_note + 0.5;
+        assert!(!game.is_finished(), "마지막 노트 직후에 끝나면 안 됩니다");
+
+        game.now_s = end - 0.1;
+        assert!(!game.is_finished(), "음악이 아직 남았는데 끝나면 안 됩니다");
+
+        game.now_s = end;
+        assert!(game.is_finished(), "음악이 끝나면 결과로 넘어가야 합니다");
+    }
+
+    /// 아직 판정할 노트가 남아 있으면 음원이 끝나도 결과로 넘어가지 않습니다.
+    #[test]
+    fn unjudged_notes_block_the_result_screen() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        game.next_note = 0;
+        game.now_s = game.song().unwrap().end_secs() + 5.0;
+        assert!(!game.is_finished());
+    }
+
     /// 제공된 JSON 이 기대한 대로 읽히는지 확인합니다.
     #[test]
     fn chart_is_parsed() {
@@ -910,10 +1269,11 @@ mod tests {
         let target = game.song().unwrap().notes[0];
         let lead = game.lead();
 
+        // 누적 오차로 마지막 표본이 노트 시각에 못 미치지 않도록 i/STEPS 로 직접 계산합니다.
+        const STEPS: u32 = 32;
         let mut prev = 0u8;
-        let mut samples = 0;
-        let mut t = target - lead;
-        while t <= target {
+        for i in 0..=STEPS {
+            let t = target - lead + lead * (i as f32 / STEPS as f32);
             game.now_s = t;
             let fill = game.vibration_fill();
             assert!(!fill.blink, "Swell 모드는 깜빡임을 쓰지 않아야 합니다");
@@ -923,15 +1283,12 @@ mod tests {
                 fill.value
             );
             prev = fill.value;
-            samples += 1;
-            t += lead / 32.0;
         }
 
-        assert!(samples > 8);
         assert_eq!(prev, 255, "노트 시각에는 최대 강도여야 합니다");
 
         // 판정 여유 구간에서도 최대치를 유지합니다.
-        game.now_s = target + GOOD_S / 2.0;
+        game.now_s = target + HIT_WINDOW_S / 2.0;
         assert_eq!(game.vibration_fill().value, 255);
     }
 
@@ -976,14 +1333,16 @@ mod tests {
 
         // 두 번째 노트를 조금 늦게 → Good
         let second = game.song().unwrap().notes[1];
-        game.now_s = second + (PERFECT_S + GOOD_S) / 2.0;
+        let perfect_tol = Judge::Perfect.tolerance().unwrap();
+        let good_tol = Judge::Good.tolerance().unwrap();
+        game.now_s = second + (perfect_tol + good_tol) / 2.0;
         game.on_hit();
         assert_eq!(game.good, 1);
         assert_eq!(game.combo, 2);
 
         // 세 번째 노트는 그냥 흘려보냄 → Miss, 콤보 초기화
         let third = game.song().unwrap().notes[2];
-        game.now_s = third + MISS_S + 0.01;
+        game.now_s = third + HIT_WINDOW_S + 0.01;
         game.reap_missed_notes();
         assert_eq!(game.miss, 1);
         assert_eq!(game.combo, 0);
