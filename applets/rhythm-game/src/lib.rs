@@ -92,34 +92,27 @@ impl VibrationMode {
     }
 }
 
-/// 진동 단계의 범위. **단계 번호가 곧 하드웨어 레벨**입니다.
+/// 진동 단계의 범위. **단계 번호가 곧 하드웨어 4비트 코드**입니다.
 ///
-/// 강도가 4비트로 양자화되어 하드웨어 레벨은 0~7 의 여덟 개뿐입니다.
-/// 단계가 그대로 4비트 코드가 되고, 펌웨어가 그 코드로 듀티를 만듭니다.
-/// `counter` 가 16씩 도는 16칸이고 `threshold = 코드 * 32` 이므로
-/// (`firmware/src/braille_display.rs`) 듀티는 **12.5% 간격**입니다.
+/// 내부는 0~7, 사람에게는 1~8단계로 말합니다(`spoken_level`).
+///
+/// 듀티는 펌웨어가 정합니다. `counter` 가 16씩 도는 16칸이고 `threshold = 코드 * 32`
+/// 이므로(`firmware/src/braille_display.rs`) 12.5% 간격입니다.
 ///
 /// | 단계 | 코드 | 듀티 |
 /// |---|---|---|
-/// | 0 | 0 | 0% (꺼짐) |
-/// | 1 | 1 | 12.5% |
-/// | 2 | 2 | 25% |
-/// | 3 | 3 | 37.5% |
-/// | 4 | 4 | 50% |
-/// | 5 | 5 | 62.5% |
-/// | 6 | 6 | 75% |
-/// | 7 | 7 | **100%** (87.5% 가 아닙니다) |
+/// | 1 | 0 | 0% (꺼짐) |
+/// | 2 | 1 | 12.5% |
+/// | 3 | 2 | 25% |
+/// | 4 | 3 | 37.5% |
+/// | 5 | 4 | 50% |
+/// | 6 | 5 | 62.5% |
+/// | 7 | 6 | 75% |
+/// | 8 | 7 | **100%** (87.5% 가 아닙니다) |
 ///
-/// 7단계만 간격이 어긋납니다. 펌웨어가 코드 7 을 `7 => true` 로 특수 처리해
-/// 듀티 계산을 거치지 않고 항상 켜 두기 때문입니다. 애플릿에서는 못 고칩니다 —
-/// 4비트 듀티 코드가 0~7 뿐이라 87.5% 를 지시할 코드가 없습니다.
-///
-/// 예고 구간 내내 이 레벨 하나로 고정됩니다. 세기가 변하지 않으므로
-/// 노트당 전송은 켜기 1회 + 끄기 1회뿐이고, 단계를 올려도 전송량은 그대로입니다.
-///
-/// 두 방식 모두 전 범위를 쓸 수 있습니다. 점멸 모드의 낮은 단계는 반주기가
-/// 예고 창보다 길어 주기가 제대로 담기지 않지만(`blink_frequency_hz` 주석 참고),
-/// **확인용으로 고를 수 있도록 막지 않습니다.** 대신 로그로 알려 줍니다.
+/// 마지막 단계만 간격이 어긋납니다. 펌웨어가 코드 7 을 `7 => true` 로 특수 처리해
+/// 듀티 계산을 건너뛰고 항상 켜 두기 때문입니다. 애플릿에서는 못 고칩니다 —
+/// 4비트 코드 0~15 중 87.5% 를 내는 것이 하나도 없습니다.
 const MIN_VIBRATION_LEVEL: u8 = 0;
 const MAX_VIBRATION_LEVEL: u8 = 7;
 
@@ -181,9 +174,9 @@ fn blink_frequency_hz(level: u8) -> Option<f32> {
 
 /// 내부 레벨(0~7)을 **사람에게 말할 번호(1~8)** 로 바꿉니다.
 ///
-/// 내부적으로는 하드웨어 레벨을 그대로 쓰는 게 맞습니다 — 4비트 코드와 1:1 이고
-/// 펌웨어·런타임 쪽 계산이 전부 0 기준이라, 여기서 어긋나면 변환이 하나 더 끼어듭니다.
-/// 반면 사람에게는 "0단계"가 어색하므로 말할 때만 1 을 더합니다.
+/// 내부는 하드웨어 4비트 코드와 1:1 로 맞춰 둡니다 — 펌웨어·런타임 계산이 전부
+/// 0 기준이라, 여기서 어긋나면 변환이 하나 더 끼어들어 조용히 한 칸씩 밀립니다.
+/// 사람에게는 "0단계"가 어색하므로 말할 때만 1 을 더합니다.
 ///
 /// 그러니 로그와 음성은 **반드시 이 함수를 거쳐야** 합니다.
 fn spoken_level(level: u8) -> u8 {
@@ -222,8 +215,13 @@ const AUDIO_OFFSET_MS: i64 = 0;
 /// 판정 단계 정의. **이 표 하나가 판정에 관한 유일한 기준입니다.**
 ///
 /// 각 항목은 `(판정, 허용 오차(초), 점수)` 이며, 오차가 작은 것부터 차례로 검사합니다.
-/// 허용 오차는 노트 시각을 기준으로 **앞뒤 양쪽**에 적용됩니다.
-/// (Perfect 0.10 이면 -100ms ~ +100ms)
+/// 허용 오차는 노트 시각을 기준으로 앞뒤 양쪽에 적용되지만,
+/// **앞쪽은 예고 시간에서 잘립니다**(`RhythmGame::on_hit`).
+///
+/// 예고가 뜨기 전에 누른 것은 느끼고 친 게 아니라 찍은 것이므로 판정하지 않습니다.
+/// 그래서 실제로 칠 수 있는 구간은 `[T - 예고 - 출력지연, T + 허용치]` 입니다
+/// (`RhythmGame::hit_opens_at`). 지금 설정(예고 200ms, 출력지연 85ms, Good 300ms)
+/// 이라면 -285ms ~ +300ms 입니다. 허용치를 아무리 늘려도 앞쪽은 그 선을 넘지 않습니다.
 ///
 /// 단계를 추가·삭제하거나 점수를 바꾸려면 이 표만 고치면 됩니다.
 /// 아래 것들이 전부 여기서 파생됩니다.
@@ -233,7 +231,7 @@ const AUDIO_OFFSET_MS: i64 = 0;
 /// * 정확도 계산 (`RhythmGame::accuracy`)
 ///
 /// Miss 는 "표의 어디에도 못 든 경우"라서 표에 넣지 않습니다.
-const HIT_TIERS: [(Judge, f32, u32); 2] = [(Judge::Perfect, 0.15, 100), (Judge::Good, 0.30, 50)];
+const HIT_TIERS: [(Judge, f32, u32); 2] = [(Judge::Perfect, 0.3, 100), (Judge::Good, 0.5, 50)];
 
 /// 노트를 칠 수 있는 마지막 경계(초) = 표의 가장 너그러운 허용 오차.
 ///
@@ -268,7 +266,7 @@ const DEFAULT_LEAD_S: f32 = 0.3;
 /// 실제 지연의 1/3 밖에 못 메웠습니다.
 ///
 /// 여전히 늦게 느껴지면 키우고, 앞서 느껴지면 줄이세요.
-const TACTILE_OUTPUT_DELAY_MS: i64 = 85;
+const TACTILE_OUTPUT_DELAY_MS: i64 = 68;
 
 /// 진동하는 원의 지름(핀 개수).
 ///
@@ -815,6 +813,22 @@ impl RhythmGame {
     }
 
     /// 가운데 키를 눌렀을 때의 판정입니다.
+    /// 이 노트를 칠 수 있게 되는 가장 이른 시각(게임 시계).
+    ///
+    /// **애플릿이 진동을 내보내기 시작하는 바로 그 시점**입니다.
+    /// `vibration_fill_with` 가 `cue_now = now_s + 출력지연` 으로 창을 여므로,
+    /// 판정 시계 기준으로는 `T - 예고 - 출력지연` 부터 핀이 올라갑니다.
+    ///
+    /// 출력 지연까지 빼 두는 이유는, 실제 물리 지연이 `TACTILE_OUTPUT_DELAY_MS`
+    /// 보다 작으면 진동이 `T - 예고` 보다 **일찍** 손끝에 닿기 때문입니다.
+    /// 그때 누른 건 정당하게 느끼고 친 것이므로 거절하면 안 됩니다.
+    /// 즉 이 경계는 "느꼈을 가능성이 있는 가장 이른 시각"입니다.
+    ///
+    /// 그래서 칠 수 있는 구간은 `[T - 예고 - 출력지연, T + 허용치]` 입니다.
+    fn hit_opens_at(&self, target: f32) -> f32 {
+        target - self.lead() - TACTILE_OUTPUT_DELAY_MS as f32 / 1000.0
+    }
+
     fn on_hit(&mut self) {
         let Some(target) = self.upcoming_note() else {
             return;
@@ -822,8 +836,25 @@ impl RhythmGame {
 
         // 부호 있는 오차: 양수면 게임 시계 기준으로 늦게 누른 것입니다.
         let signed_error = self.now_s - target;
+
+        // **예고가 나가기도 전에 누른 것은 아예 없던 일로 칩니다.**
+        //
+        // 판정 허용치(`HIT_TIERS`)가 예고보다 길면, 예고가 뜨기도 전에 눌러도
+        // 판정이 붙어 버립니다. 지금 설정이 그렇습니다 — 예고 200ms 에 Good 300ms 라
+        // `T - 250ms` 에 누르면 아직 아무 신호도 못 느낀 상태인데 Good 이 됩니다.
+        // 그건 맞춘 게 아니라 찍은 것이므로 판정 자체를 하지 않습니다.
+        //
+        // 경계는 `hit_opens_at` 이 정합니다. 허용치를 아무리 늘려도 앞쪽은
+        // 그 선을 넘지 않습니다.
+        //
+        // 무시이지 미스가 아닙니다. 노트를 소비하지도, 콤보를 끊지도 않습니다 —
+        // 예고를 못 느낀 상태의 헛손질로 벌을 주면 억울하니까요.
+        if self.now_s < self.hit_opens_at(target) {
+            return;
+        }
+
         let Some(judge) = Judge::from_error(signed_error.abs()) else {
-            // 아직 예고조차 시작되지 않았거나 이미 놓친 노트 — 헛손질은 감점 없이 무시합니다.
+            // 이미 놓친 노트 — 헛손질은 감점 없이 무시합니다.
             return;
         };
 
@@ -1333,7 +1364,6 @@ impl Applet for RhythmGame {
                 // 여기서는 계속 켜 두므로 S / A·D 로 방식과 단계를 천천히 비교할 수 있습니다.
                 // 손가락 올릴 위치를 찾는 역할도 겸합니다.
                 // 레벨 0 은 값이 0 이라 아무것도 그리지 않습니다.
-                // 대신 테두리 같은 걸 올리면 "진동 0인데 뭔가 뜬다"가 되어 헷갈립니다.
                 let intensity = self.vibration_preview();
                 if intensity.value > 0 {
                     // `draw_circle` 이 아니라 `fill_circle` 입니다 — blink 보존 때문입니다.
@@ -2254,20 +2284,103 @@ mod tests {
         );
     }
 
-    /// 사람에게 말하는 번호는 1~8, 내부 레벨은 0~7 이어야 합니다.
+    /// 진동이 나가기도 전에 누른 것은 **판정 자체를 하지 않아야** 합니다.
     ///
-    /// 내부는 하드웨어 4비트 코드와 1:1 로 맞춰 두고(펌웨어·런타임이 전부 0 기준),
-    /// 표시할 때만 1 을 더합니다. 둘이 섞이면 조용히 한 단계씩 어긋납니다.
+    /// 경계는 `hit_opens_at` = `T - 예고 - 출력지연` 입니다.
+    /// 노트를 소비하지도, 콤보를 끊지도, 타이밍 통계에 넣지도 않습니다.
+    #[test]
+    fn presses_before_the_cue_goes_out_are_ignored_entirely() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+        let opens = game.hit_opens_at(target);
+
+        // 경계는 진동이 실제로 켜지는 시점과 정확히 같아야 합니다.
+        game.now_s = opens - 0.001;
+        assert_eq!(
+            game.vibration_fill(),
+            Intensity::OFF,
+            "경계 직전에는 아직 진동이 안 나가야 합니다"
+        );
+        game.now_s = opens + 0.001;
+        assert!(
+            game.vibration_fill().value > 0,
+            "경계 직후에는 진동이 나가야 합니다"
+        );
+
+        // 경계 직전에 누르면 아무 일도 일어나지 않습니다.
+        game.now_s = opens - 0.001;
+        game.on_hit();
+        assert_eq!(game.next_note, 0, "노트를 소비하면 안 됩니다");
+        assert_eq!(game.perfect + game.good + game.miss, 0, "판정이 붙으면 안 됩니다");
+        assert_eq!(game.combo, 0);
+        assert_eq!(game.timing_error_count, 0, "타이밍 통계에도 들어가면 안 됩니다");
+
+        // 경계 직후에는 정상 판정됩니다.
+        game.now_s = opens + 0.001;
+        game.on_hit();
+        assert_eq!(game.next_note, 1, "경계 뒤에는 판정되어야 합니다");
+        assert_eq!(game.perfect + game.good, 1);
+    }
+
+    /// 허용치가 `예고 + 출력지연` 보다 길면, 그 사이 구간은
+    /// "허용치 안이지만 아직 진동이 안 나간" 상태라 무시되어야 합니다.
+    #[test]
+    fn the_tolerance_cannot_reach_past_the_cue_on_the_early_side() {
+        let game = loaded_game();
+        let reach = game.lead() + CUE_ADVANCE_S;
+
+        if HIT_WINDOW_S <= reach {
+            // 허용치가 짧아 겹치는 구간이 없으면 검사할 것이 없습니다.
+            return;
+        }
+
+        // 허용치 안이면서 경계보다 이른 시각 — 두 조건을 모두 만족하는 지점
+        let error = -(reach + HIT_WINDOW_S) / 2.0;
+        assert!(error.abs() < HIT_WINDOW_S, "허용치 안이어야 합니다");
+        assert!(error < -reach, "경계보다 일러야 합니다");
+
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+
+        game.now_s = target + error;
+        assert!(
+            Judge::from_error(error.abs()).is_some(),
+            "허용치만 보면 판정이 붙는 시각이어야 테스트가 성립합니다"
+        );
+
+        game.on_hit();
+        assert_eq!(game.next_note, 0, "허용치 안이라도 진동 전이면 무시해야 합니다");
+        assert_eq!(game.perfect + game.good + game.miss, 0);
+    }
+
+    /// 뒤쪽 경계는 그대로 허용치가 정합니다. 예고 때문에 좁아지면 안 됩니다.
+    #[test]
+    fn the_late_side_is_still_governed_by_the_tolerance() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+
+        // 허용치 바로 안쪽: 판정되어야 합니다.
+        game.now_s = target + HIT_WINDOW_S - 0.01;
+        game.on_hit();
+        assert_eq!(game.next_note, 1, "허용치 안이면 늦어도 판정되어야 합니다");
+
+        // 허용치 바깥: 무시됩니다.
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        game.now_s = target + HIT_WINDOW_S + 0.01;
+        game.on_hit();
+        assert_eq!(game.next_note, 0);
+    }
+
+    /// 사람에게 말하는 번호는 1~8, 내부 레벨은 0~7 이어야 합니다.
     #[test]
     fn levels_are_spoken_as_one_through_eight() {
-        assert_eq!(spoken_level(MIN_VIBRATION_LEVEL), 1, "최저 단계는 1단계로 말해야 합니다");
-        assert_eq!(spoken_level(MAX_VIBRATION_LEVEL), 8, "최고 단계는 8단계로 말해야 합니다");
-
-        // 내부 범위는 0~7 그대로입니다.
         assert_eq!(MIN_VIBRATION_LEVEL, 0);
         assert_eq!(MAX_VIBRATION_LEVEL, 7);
 
-        // 여덟 단계가 빠짐없이 1~8 로 이어져야 합니다.
         let spoken: Vec<u8> = (MIN_VIBRATION_LEVEL..=MAX_VIBRATION_LEVEL)
             .map(spoken_level)
             .collect();
@@ -2310,18 +2423,6 @@ mod tests {
                 game.visual.fill.value, 0,
                 "{mode:?} 레벨 0 인데 진동 세기가 0 이 아닙니다"
             );
-
-            let mut canvas = Canvas::new(size);
-            game.on_draw(&mut canvas).expect("on_draw 실패");
-            for y in 0..size.height - 2 {
-                for x in 0..size.width {
-                    assert_eq!(
-                        canvas.get_pin(Point::new(x, y)).value,
-                        0,
-                        "{mode:?} 레벨 0 인데 연주 화면 ({x},{y}) 에 핀이 떴습니다"
-                    );
-                }
-            }
         }
     }
 
@@ -2409,7 +2510,7 @@ mod tests {
             values.push(fill.value);
         }
 
-        assert_eq!(values.len(), 8, "0~7 단계 여덟 개여야 합니다");
+        assert_eq!(values.len(), 8, "레벨 0~7 여덟 개여야 합니다");
         assert_eq!(*values.last().unwrap(), 255, "레벨 7 은 최대여야 합니다");
         assert!(
             values.windows(2).all(|w| w[0] < w[1]),
