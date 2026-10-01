@@ -59,6 +59,12 @@ enum VibrationMode {
 const DEFAULT_VIBRATION_MODE: VibrationMode = VibrationMode::DutyRatio;
 
 impl VibrationMode {
+    /// 이 방식에서 쓸 수 있는 단계 범위입니다.
+    /// 두 방식 모두 하드웨어 전 범위(0~7)를 씁니다.
+    fn level_range(self) -> (u8, u8) {
+        (MIN_VIBRATION_LEVEL, MAX_VIBRATION_LEVEL)
+    }
+
     /// 기능 키를 누를 때마다 다른 방식으로 넘어갑니다.
     fn next(self) -> Self {
         match self {
@@ -86,21 +92,92 @@ impl VibrationMode {
     }
 }
 
-/// 진동 단계. **단계 번호가 곧 하드웨어 레벨**입니다.
+/// 진동 단계의 범위. **단계 번호가 곧 하드웨어 레벨**입니다.
 ///
-/// 강도가 4비트로 양자화되어 하드웨어 레벨은 0~7 뿐인데, 0 은 "꺼짐"이라
-/// 설정값으로는 의미가 없습니다. 그래서 쓸 수 있는 범위는 **1~7** 입니다.
+/// 강도가 4비트로 양자화되어 하드웨어 레벨은 0~7 의 여덟 개뿐입니다.
+/// 단계가 그대로 4비트 코드가 되고, 펌웨어가 그 코드로 듀티를 만듭니다.
+/// `counter` 가 16씩 도는 16칸이고 `threshold = 코드 * 32` 이므로
+/// (`firmware/src/braille_display.rs`) 듀티는 **12.5% 간격**입니다.
+///
+/// | 단계 | 코드 | 듀티 |
+/// |---|---|---|
+/// | 0 | 0 | 0% (꺼짐) |
+/// | 1 | 1 | 12.5% |
+/// | 2 | 2 | 25% |
+/// | 3 | 3 | 37.5% |
+/// | 4 | 4 | 50% |
+/// | 5 | 5 | 62.5% |
+/// | 6 | 6 | 75% |
+/// | 7 | 7 | **100%** (87.5% 가 아닙니다) |
+///
+/// 7단계만 간격이 어긋납니다. 펌웨어가 코드 7 을 `7 => true` 로 특수 처리해
+/// 듀티 계산을 거치지 않고 항상 켜 두기 때문입니다. 애플릿에서는 못 고칩니다 —
+/// 4비트 듀티 코드가 0~7 뿐이라 87.5% 를 지시할 코드가 없습니다.
 ///
 /// 예고 구간 내내 이 레벨 하나로 고정됩니다. 세기가 변하지 않으므로
 /// 노트당 전송은 켜기 1회 + 끄기 1회뿐이고, 단계를 올려도 전송량은 그대로입니다.
 ///
-/// 두 모드가 이 값을 똑같이 받아, 한쪽은 듀티비로 다른 쪽은 점멸 주기로 냅니다.
-/// 같은 단계를 두 방식으로 바로 번갈아 느껴 볼 수 있습니다.
-const MIN_VIBRATION_LEVEL: u8 = 1;
+/// 두 방식 모두 전 범위를 쓸 수 있습니다. 점멸 모드의 낮은 단계는 반주기가
+/// 예고 창보다 길어 주기가 제대로 담기지 않지만(`blink_frequency_hz` 주석 참고),
+/// **확인용으로 고를 수 있도록 막지 않습니다.** 대신 로그로 알려 줍니다.
+const MIN_VIBRATION_LEVEL: u8 = 0;
 const MAX_VIBRATION_LEVEL: u8 = 7;
 
-/// 켰을 때의 기본 단계. A/D 키로 1~7 사이에서 바꿉니다.
+/// 켰을 때의 기본 단계. A/D 키로 바꿉니다.
 const DEFAULT_VIBRATION_LEVEL: u8 = MAX_VIBRATION_LEVEL;
+
+/// `blink` 플래그를 보존하면서 채워진 원을 그립니다.
+///
+/// **`graphics` 확장의 `draw_circle`/`draw_rectangle` 을 쓰면 안 됩니다.**
+/// 그 경로는 `embedded-graphics` 의 `Gray8`(8비트 밝기 하나)로 색을 다루고,
+/// 픽셀을 찍을 때 `Intensity::from(color.luma())` 로 되돌립니다
+/// (`extensions/graphics/src/lib.rs`). `luma()` 는 `u8` 뿐이라
+/// **`blink` 가 그 지점에서 조용히 버려집니다.** 점멸 모드가 듀티 모드로 둔갑합니다.
+///
+/// `tactile-display-demo` 의 격자가 제대로 깜빡이는 이유도 이것입니다 —
+/// 거기서는 `display.set_pin(point, intensity)` 로 `Intensity` 를 통째로 넘깁니다
+/// (`extensions/widget/src/item_selector/grid.rs`).
+fn fill_circle(
+    canvas: &mut dyn DisplayInterface,
+    center: Point,
+    diameter: i16,
+    intensity: Intensity,
+) {
+    // `graphics` 의 `draw_circle` 과 같은 기준점 계산입니다.
+    let top_left_x = center.x - diameter / 2;
+    let top_left_y = center.y - diameter / 2;
+    // 중심을 반 픽셀 보정해 두 방식의 모양을 맞춥니다.
+    let cx = top_left_x as f32 + (diameter as f32 - 1.0) / 2.0;
+    let cy = top_left_y as f32 + (diameter as f32 - 1.0) / 2.0;
+    let r = diameter as f32 / 2.0;
+
+    for y in top_left_y..top_left_y + diameter {
+        for x in top_left_x..top_left_x + diameter {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            if dx * dx + dy * dy <= r * r {
+                canvas.set_pin(Point::new(x, y), intensity);
+            }
+        }
+    }
+}
+
+/// 점멸 모드에서 한 단계가 내는 주파수(Hz)입니다. 7단계는 항상 켜짐이라 없습니다.
+///
+/// 펌웨어가 4비트 코드 9~14 를 반주기 500·250·125·62.5·31.25·15.625ms 로 해석합니다
+/// (`firmware/src/braille_display.rs`). 런타임이 `8 + 레벨` 로 코드를 만드므로
+/// 레벨 1~6 이 코드 9~14, 레벨 7 이 코드 15(항상 켜짐)가 됩니다.
+fn blink_frequency_hz(level: u8) -> Option<f32> {
+    match level {
+        1 => Some(1.0),
+        2 => Some(2.0),
+        3 => Some(4.0),
+        4 => Some(8.0),
+        5 => Some(16.0),
+        6 => Some(32.0),
+        _ => None,
+    }
+}
 
 /// 단계(= 하드웨어 레벨 0~7)를 그 레벨이 나오는 강도값으로 바꿉니다.
 ///
@@ -184,15 +261,25 @@ const TACTILE_OUTPUT_DELAY_MS: i64 = 85;
 
 /// 진동하는 원의 지름(핀 개수).
 ///
-/// 화면은 48x32 이고, 그리는 쪽에서 `size.height - 4` 로 한 번 더 깎입니다.
+/// 크기 자체도 요구사항이지만, 이 값은 **전체 프레임 전송을 보장하는 역할**도 합니다.
 ///
-/// 참고: 원을 한 단계 세게 만들 때마다 원 안의 모든 핀을 다시 보내야 합니다.
-/// 지름 18 은 256핀 = 762B 이고 링크가 115,200 baud 라 한 단계에 약 66ms 걸립니다.
-/// `SWELL_MIN_INTENSITY` 가 255(1단계)라 예고 중에는 세기가 변하지 않으므로,
-/// 노트당 전송은 켜기 1회 + 끄기 1회 = 약 132ms 뿐입니다. 예고 200ms 안에 들어옵니다.
-/// 단계를 늘리면 (단계 수 × 66ms) 가 예고를 넘지 않는지 확인하세요 —
-/// 넘기면 중간 단계가 전송 큐에서 버려집니다(`net_comm.rs`).
-const VIBRATING_DISC_DIAMETER: i16 = 18;
+/// 런타임은 `diff_data.len() * 2 >= 768` 일 때만 전체 프레임(`UpdateDisplay`)을 보내고
+/// (`runtime-native/src/hal/display/braille_display.rs`), 펌웨어는 **그 경로에서만**
+/// `IS_4BIT_MODE` 를 켭니다. 차이 경로는 읽기만 합니다(`firmware/src/bin/main.rs`).
+/// 플래그가 꺼져 있으면 점멸 코드 9~14 가 듀티값 153~238 로 둔갑해,
+/// 점멸 모드가 그냥 센 듀티 모드가 됩니다.
+///
+/// 원이 384핀 이상이면 켜고 끌 때마다 전체 프레임이 나가므로 플래그가 계속 유지됩니다.
+///
+/// | 지름 | 핀 | diff×2 | 전체 프레임 |
+/// |---|---|---|---|
+/// | 18 | 256 | 512 | 아니오 |
+/// | 22 | 384 | 768 | 예 (경계) |
+/// | **24** | **448** | **896** | **예** |
+///
+/// 전송량은 전체 프레임 768B 로, 지름 18 의 차이 전송 756B 와 사실상 같습니다(약 66ms).
+/// 즉 원을 키워서 얻는 안정성이 공짜입니다.
+const VIBRATING_DISC_DIAMETER: i16 = 24;
 
 // --- 오디오 재생 위치 동기화 -------------------------------------------------
 //
@@ -845,6 +932,7 @@ impl RhythmGame {
     /// 음악(효과음 트랙)과 TTS 는 트랙이 달라서 안내 음성이 곡을 끊지 않습니다.
     fn cycle_vibration_mode(&mut self, context: &mut Context) {
         self.vibration_mode = self.vibration_mode.next();
+
         let label = self.vibration_mode.label(context.language);
         // 시연 중 같은 안내를 반복할 수 있도록 forced 로 보냅니다.
         context
@@ -863,6 +951,20 @@ impl RhythmGame {
             return Intensity::OFF;
         }
 
+        let (lo, hi) = mode.level_range();
+        let level = self.vibration_level.clamp(lo, hi);
+
+        // 창은 **항상 예고 그대로**입니다. 방식이나 단계에 따라 늘리지 않습니다.
+        //
+        // 점멸의 낮은 단계는 반주기가 예고보다 길어 창 안에 주기가 담기지 않습니다.
+        // 1단계(1Hz)는 반주기가 500ms 라 예고 200ms 가 통째로 한 반주기에 들어가고,
+        // 펌웨어가 절대 시각 기준으로 위상을 잡으므로(`firmware/src/braille_display.rs`)
+        // 어느 반주기에 걸릴지는 노트마다 다릅니다 — **진동이 아예 안 뜨는 노트가 생깁니다.**
+        //
+        // 그게 그 단계의 실제 한계이므로 숨기지 않고 그대로 보여 줍니다.
+        // 창을 늘려 억지로 보이게 하면 단계마다 예고 길이가 달라져 게임이 흔들립니다.
+        let window = lead;
+
         // 진동 전용 시계입니다. 판정 시계(`now_s`)보다 출력 지연만큼 앞서 갑니다.
         // 핀 값을 바꿔도 손끝에 닿기까지 시간이 걸리므로, 그만큼 미리 내보내야
         // 실제로 느껴지는 시점이 음악과 맞습니다.
@@ -880,15 +982,12 @@ impl RhythmGame {
         //   보정해서 미리 끄면 정작 쳐야 할 순간에 진동이 이미 없습니다.
         //
         // 그래서 켜져 있는 구간은 `[T - 예고 - 보정, T]`, 길이는 `예고 + 보정` 입니다.
-        let since_start = cue_now - (target - lead);
+        let since_start = cue_now - (target - window);
         if since_start < 0.0 || self.now_s > target {
             return Intensity::OFF;
         }
-        // 예고 내내 이 레벨 하나로 고정입니다. 올라가거나 내려가지 않습니다.
+        // 창 내내 이 레벨 하나로 고정입니다. 올라가거나 내려가지 않습니다.
         // 두 모드의 차이는 "같은 레벨을 무엇으로 표현하느냐" 뿐입니다.
-        let level = self
-            .vibration_level
-            .clamp(MIN_VIBRATION_LEVEL, MAX_VIBRATION_LEVEL);
         let value = level_to_value(level);
 
         match mode {
@@ -900,11 +999,20 @@ impl RhythmGame {
         }
     }
 
-    /// A/D 키: 진동 단계를 1~7 사이에서 조절하고 음성으로 알려 줍니다.
+    /// 곡 선택 화면에서 **계속** 내보낼 진동입니다. 노트 창과 무관합니다.
+    fn vibration_preview(&self) -> Intensity {
+        let (lo, hi) = self.vibration_mode.level_range();
+        let value = level_to_value(self.vibration_level.clamp(lo, hi));
+        match self.vibration_mode {
+            VibrationMode::DutyRatio => Intensity::new(value),
+            VibrationMode::BlinkPeriod => Intensity::new_blink(value),
+        }
+    }
+
+    /// A/D 키: 진동 단계를 현재 방식의 범위 안에서 조절하고 음성으로 알려 줍니다.
     fn adjust_vibration_level(&mut self, context: &mut Context, delta: i8) {
-        let next = (self.vibration_level as i8 + delta)
-            .clamp(MIN_VIBRATION_LEVEL as i8, MAX_VIBRATION_LEVEL as i8)
-            as u8;
+        let (lo, hi) = self.vibration_mode.level_range();
+        let next = (self.vibration_level.clamp(lo, hi) as i8 + delta).clamp(lo as i8, hi as i8) as u8;
         if next == self.vibration_level {
             return;
         }
@@ -919,11 +1027,30 @@ impl RhythmGame {
             .audio
             .speak_text_with_option(&label, SpeechOption::forced());
 
-        log::info!(
-            "진동 단계 {next}/{MAX_VIBRATION_LEVEL} (강도값 {}, 방식 {:?})",
-            level_to_value(next),
-            self.vibration_mode
-        );
+        match (self.vibration_mode, blink_frequency_hz(next)) {
+            (VibrationMode::BlinkPeriod, Some(hz)) => {
+                let lead_ms = self.lead() * 1000.0;
+                let half_ms = 500.0 / hz;
+                // 창이 경계를 하나도 안 넘을 확률 = 통째로 켜지거나 꺼질 확률
+                let solid = ((half_ms - lead_ms) / half_ms).max(0.0) * 100.0;
+                log::info!(
+                    "진동 단계 {next} — 점멸 {hz}Hz(반주기 {half_ms:.0}ms),                      예고 {lead_ms:.0}ms 에 평균 전환 {:.1}회{}",
+                    lead_ms / half_ms,
+                    if solid > 0.0 {
+                        format!(" ← 노트의 약 {solid:.0}% 는 깜빡임 없이 통째로 켜지거나 꺼집니다")
+                    } else {
+                        String::new()
+                    }
+                );
+            }
+            (VibrationMode::BlinkPeriod, None) => {
+                log::info!("진동 단계 {next} — 점멸 모드지만 정적입니다 (0=꺼짐, 7=항상 켜짐)")
+            }
+            (VibrationMode::DutyRatio, _) => log::info!(
+                "진동 단계 {next}/{MAX_VIBRATION_LEVEL} — 듀티비, 강도값 {}",
+                level_to_value(next)
+            ),
+        }
     }
 
     /// 이번 프레임에 그려야 할 내용을 계산합니다.
@@ -943,7 +1070,11 @@ impl RhythmGame {
 
     /// 화면 중앙 원의 바깥 지름입니다.
     fn circle_diameter(size: Size) -> i16 {
-        (size.width.min(size.height) - 8).clamp(6, 40)
+        // 화면에 들어가는 선에서 `VIBRATING_DISC_DIAMETER` 를 씁니다.
+        // 그 상수는 전체 프레임 전송 임계값(384핀)과 묶여 있으니 주석을 보세요.
+        VIBRATING_DISC_DIAMETER
+            .min(size.width.min(size.height) - 4)
+            .max(2)
     }
 
     /// 판정된 입력들의 평균 타이밍 오차(ms). 입력이 없으면 `None`.
@@ -1012,10 +1143,10 @@ impl Applet for RhythmGame {
             // 웹 시뮬레이터 라벨 기준으로 S / A / D 입니다.
             // (`runtime-web/src/runner.rs` 매핑: S=Down, A=Left, D=Right, 모두 왼쪽)
             //
-            // **연주 중에만** 가로챕니다. 곡 선택 화면에서는 이 키들이 원래대로
-            // 곡을 고르는 데 쓰이고, 메뉴 키도 양쪽 다 나가기로 그대로 둡니다.
-            // 진동은 연주 중에만 나오니, 조절도 그때만 할 수 있으면 충분합니다.
-            if self.state == GameState::Playing && event.side == KeypadSide::Left {
+            // **왼쪽 키패드 = 진동 조절**, 오른쪽 키패드 = 화면 이동으로 나눕니다.
+            // 곡 선택 화면에서도 조절할 수 있어야 Blink8 처럼 느긋하게 비교할 수 있고,
+            // 곡 고르기는 오른쪽 방향키로 그대로 됩니다. 메뉴 키는 양쪽 다 나가기입니다.
+            if event.side == KeypadSide::Left && event.code != KeyCode::Menu {
                 match event.code {
                     // S — 진동 방식 전환 (듀티비 ↔ 점멸 주기)
                     KeyCode::Down => {
@@ -1176,13 +1307,24 @@ impl Applet for RhythmGame {
         if size.width <= 0 || size.height <= 0 {
             return Ok(());
         }
+
         let center = Point::new(size.width / 2, size.height / 2);
         let diameter = Self::circle_diameter(size);
 
         match self.state {
             GameState::SongSelect => {
-                // 연주 전에는 손가락을 올릴 위치를 찾을 수 있도록 테두리를 보여 줍니다.
-                canvas.draw_circle(center, diameter, Style::with_stroke(Intensity::new(90), 1));
+                // 원을 지금 설정 그대로 **계속** 진동시킵니다. 끄지 않습니다.
+                //
+                // 연주 중 예고는 길어야 1.1초라 느린 주기는 한 주기도 담기지 않습니다.
+                // 여기서는 계속 켜 두므로 S / A·D 로 방식과 단계를 천천히 비교할 수 있습니다.
+                // 손가락 올릴 위치를 찾는 역할도 겸합니다.
+                // 0단계는 값이 0 이라 아무것도 그리지 않습니다.
+                // 대신 테두리 같은 걸 올리면 "진동 0인데 뭔가 뜬다"가 되어 헷갈립니다.
+                let intensity = self.vibration_preview();
+                if intensity.value > 0 {
+                    // `draw_circle` 이 아니라 `fill_circle` 입니다 — blink 보존 때문입니다.
+                    fill_circle(canvas, center, diameter, intensity);
+                }
 
                 // 곡 개수만큼 점을 찍고 현재 선택된 곡만 강하게 표시합니다.
                 let count = self.songs.len().max(1) as i16;
@@ -1208,11 +1350,8 @@ impl Applet for RhythmGame {
                 // 정적인 테두리 + 강해지는 중심 조합은 "가운데만 세진다"는 느낌을 줍니다.
                 let fill = self.visual.fill;
                 if fill.value > 0 {
-                    canvas.draw_circle(
-                        center,
-                        VIBRATING_DISC_DIAMETER.min(size.height - 4).max(2),
-                        Style::with_fill(fill),
-                    );
+                    // `draw_circle` 이 아니라 `fill_circle` 입니다 — blink 보존 때문입니다.
+                    fill_circle(canvas, center, Self::circle_diameter(size), fill);
                 }
 
                 // 곡 진행 막대 (맨 아랫줄)
@@ -1314,11 +1453,11 @@ impl Applet for RhythmGame {
 
     fn on_help(&self, _context: &Context) -> LocalizedString {
         LocalizedString {
-            ko: "리듬 게임입니다. 곡 선택 화면에서 좌우 키로 곡을 고르고 가운데 키를 누르면 연주가 시작됩니다. 화면 가운데 원의 진동이 점점 강해지다가 가장 강해지는 순간에 가운데 키를 누르세요. 연주 중에는 왼쪽 키패드의 아래 키로 진동 방식을 바꾸고, 왼쪽 키로 진동 단계를 1까지 내리고, 오른쪽 키로 7까지 올립니다. 메뉴 키를 누르면 연주를 중단하거나 애플릿을 종료합니다."
+            ko: "리듬 게임입니다. 곡 선택 화면에서 좌우 키로 곡을 고르고 가운데 키를 누르면 연주가 시작됩니다. 화면 가운데 원의 진동이 점점 강해지다가 가장 강해지는 순간에 가운데 키를 누르세요. 왼쪽 키패드로 진동을 조절합니다. 아래 키로 방식을 바꾸고, 왼쪽 키와 오른쪽 키로 단계를 0부터 7까지 조절합니다. 두 방식 모두 같은 범위입니다. 곡 선택 화면에서는 원이 그 설정대로 계속 진동하므로 천천히 비교해 볼 수 있습니다. 곡은 오른쪽 방향키로 고릅니다. 메뉴 키를 누르면 연주를 중단하거나 애플릿을 종료합니다."
                 .to_string(),
-            en: "Rhythm game. On the song select screen use left and right to choose a track, then press the center key to start. The circle in the middle vibrates more and more strongly; press the center key at its peak. While playing, the left keypad adjusts the vibration: down switches the style, left lowers the level down to 1 and right raises it up to 7. Press menu to stop or exit."
+            en: "Rhythm game. On the song select screen use left and right to choose a track, then press the center key to start. The circle in the middle vibrates more and more strongly; press the center key at its peak. The left keypad adjusts the vibration: down switches the style, left and right adjust the level from 0 to 7. Both styles use the same range. On the song select screen the circle keeps vibrating with that setting so you can compare at your own pace. Pick songs with the right arrow keys. Press menu to stop or exit."
                 .to_string(),
-            ja: "リズムゲームです。曲選択画面で左右キーで曲を選び、中央キーで演奏を開始します。中央の円の振動が徐々に強くなり、最も強くなった瞬間に中央キーを押してください。演奏中は左キーパッドの下キーで振動方式を切り替え、左キーで段階を1まで下げ、右キーで7まで上げます。メニューキーで中断または終了します。"
+            ja: "リズムゲームです。曲選択画面で左右キーで曲を選び、中央キーで演奏を開始します。中央の円の振動が徐々に強くなり、最も強くなった瞬間に中央キーを押してください。左キーパッドで振動を調整します。下キーで方式、左キーと右キーで段階を0から7まで調整します。どちらの方式も同じ範囲です。曲選択画面では円がその設定で振動し続けるのでゆっくり比較できます。曲は右の方向キーで選びます。メニューキーで中断または終了します。"
                 .to_string(),
         }
     }
@@ -1700,21 +1839,179 @@ mod tests {
         }
     }
 
-    /// 곡 선택 화면에서는 왼쪽 A/D 가 원래대로 곡을 고르는 데 쓰여야 합니다.
-    /// 진동 조절은 연주 중에만 가로챕니다.
+    /// 왼쪽 키패드는 **어느 화면에서든** 진동 조절입니다.
+    /// 곡 선택 화면에서도 조절돼야 Blink8 처럼 느긋하게 비교할 수 있습니다.
     #[test]
-    fn left_arrows_still_pick_songs_outside_play() {
+    fn left_keypad_adjusts_vibration_on_the_song_select_screen() {
         let mut game = loaded_game();
         let mut context = Context::new();
         assert_eq!(game.state, GameState::SongSelect);
 
-        let before = game.vibration_level;
-        press_left(&mut game, &mut context, KeyCode::Right);
+        game.vibration_level = 4;
+        press_left(&mut game, &mut context, KeyCode::Left);
+        assert_eq!(game.vibration_level, 3, "곡 선택 화면에서도 단계가 내려가야 합니다");
 
+        press_left(&mut game, &mut context, KeyCode::Right);
+        assert_eq!(game.vibration_level, 4, "곡 선택 화면에서도 단계가 올라가야 합니다");
+
+        let before = game.vibration_mode;
+        press_left(&mut game, &mut context, KeyCode::Down);
+        assert_ne!(game.vibration_mode, before, "곡 선택 화면에서도 방식이 바뀌어야 합니다");
+    }
+
+    /// 곡 고르기는 **오른쪽** 방향키로 그대로 되어야 합니다.
+    #[test]
+    fn the_right_keypad_still_picks_songs() {
+        let mut game = loaded_game();
+        let mut context = Context::new();
+        assert_eq!(game.state, GameState::SongSelect);
+
+        let before = game.selected;
+        context.keypad.push_event_front(KeypadEvent {
+            code: KeyCode::Right,
+            state: KeyState::Pressed,
+            side: KeypadSide::Right,
+        });
+        game.on_update(&mut context).expect("on_update 실패");
+
+        // 곡이 하나뿐이면 제자리로 돌아오므로, 단계가 안 바뀌었는지로 확인합니다.
         assert_eq!(
-            game.vibration_level, before,
-            "곡 선택 화면에서는 단계가 바뀌면 안 됩니다"
+            game.vibration_level, DEFAULT_VIBRATION_LEVEL,
+            "오른쪽 방향키는 진동 단계를 건드리면 안 됩니다"
         );
+        assert_eq!(
+            game.selected,
+            (before + 1) % game.songs.len().max(1),
+            "오른쪽 방향키로 곡이 넘어가야 합니다"
+        );
+    }
+
+    /// **회귀 테스트.** 점멸 모드로 그린 핀은 화면까지 `blink` 를 달고 가야 합니다.
+    ///
+    /// `graphics` 확장의 `draw_circle`/`draw_rectangle` 은 내부적으로 `Gray8` 을 거치고
+    /// `Intensity::from(color.luma())` 로 되돌리기 때문에 `blink` 가 조용히 사라집니다.
+    /// 그 경로로 그리면 점멸 모드가 그냥 듀티 모드가 되어, 손끝으로만 알 수 있습니다.
+    /// 그래서 `fill_circle` 로 `set_pin` 을 직접 호출합니다.
+    #[test]
+    fn blink_flag_survives_all_the_way_to_the_canvas() {
+        let size = Size::new(48, 32);
+
+        for (state, label) in [
+            (GameState::SongSelect, "곡 선택 격자"),
+            (GameState::Playing, "연주 중 원"),
+        ] {
+            let mut game = loaded_game();
+            game.state = state;
+            game.vibration_mode = VibrationMode::BlinkPeriod;
+            game.vibration_level = 4;
+
+            if state == GameState::Playing {
+                // 진동이 켜져 있는 순간으로 맞춥니다.
+                let target = game.song().unwrap().notes[0];
+                game.now_s = target - 0.01;
+                game.visual = game.compute_visual(size.width);
+                assert!(game.visual.fill.blink, "{label}: 계산 단계에서 이미 blink 가 없습니다");
+            }
+
+            let mut canvas = Canvas::new(size);
+            game.on_draw(&mut canvas).expect("on_draw 실패");
+
+            // 곡 표시용 점과 곡 진행 막대는 진동이 아니라 정적 표시이므로
+            // 맨 아래 두 줄은 검사에서 뺍니다.
+            let scan_bottom = size.height - 2;
+
+            let mut lit = 0usize;
+            let mut blinking = 0usize;
+            for y in 0..scan_bottom {
+                for x in 0..size.width {
+                    let pin = canvas.get_pin(Point::new(x, y));
+                    if pin.value > 0 {
+                        lit += 1;
+                        if pin.blink {
+                            blinking += 1;
+                        }
+                    }
+                }
+            }
+
+            assert!(lit > 0, "{label}: 그려진 핀이 없습니다");
+            assert_eq!(
+                blinking, lit,
+                "{label}: 켜진 {lit}핀 중 {blinking}핀만 blink 입니다.                  graphics 확장의 draw_* 를 쓰면 Gray8 을 거치며 blink 가 버려집니다."
+            );
+        }
+    }
+
+    /// 듀티비 모드는 반대로 `blink` 가 붙으면 안 됩니다.
+    #[test]
+    fn duty_mode_never_sets_the_blink_flag() {
+        let size = Size::new(48, 32);
+        let mut game = loaded_game();
+        game.vibration_mode = VibrationMode::DutyRatio;
+
+        let mut canvas = Canvas::new(size);
+        game.on_draw(&mut canvas).expect("on_draw 실패");
+
+        for y in 0..size.height {
+            for x in 0..size.width {
+                let pin = canvas.get_pin(Point::new(x, y));
+                assert!(
+                    !pin.blink,
+                    "듀티비 모드인데 ({x},{y}) 핀에 blink 가 붙었습니다"
+                );
+            }
+        }
+    }
+
+    /// 두 방식 모두 하드웨어 전 범위(0~7)를 쓸 수 있어야 합니다.
+    ///
+    /// 점멸의 낮은 단계는 예고 창 안에 주기가 담기지 않지만, 확인용으로 막지 않습니다.
+    #[test]
+    fn both_modes_expose_the_full_level_range() {
+        for mode in [VibrationMode::DutyRatio, VibrationMode::BlinkPeriod] {
+            assert_eq!(
+                mode.level_range(),
+                (MIN_VIBRATION_LEVEL, MAX_VIBRATION_LEVEL),
+                "{mode:?} 가 전 범위를 쓰지 못합니다"
+            );
+        }
+
+        let mut game = loaded_game();
+        let mut context = Context::new();
+        game.vibration_mode = VibrationMode::BlinkPeriod;
+        game.vibration_level = MAX_VIBRATION_LEVEL;
+
+        // 0 까지 내려갑니다.
+        for expected in (MIN_VIBRATION_LEVEL..MAX_VIBRATION_LEVEL).rev() {
+            press_left(&mut game, &mut context, KeyCode::Left);
+            assert_eq!(game.vibration_level, expected);
+        }
+        press_left(&mut game, &mut context, KeyCode::Left);
+        assert_eq!(game.vibration_level, MIN_VIBRATION_LEVEL, "0 아래로는 안 내려갑니다");
+
+        // 7 까지 올라갑니다.
+        for expected in (MIN_VIBRATION_LEVEL + 1)..=MAX_VIBRATION_LEVEL {
+            press_left(&mut game, &mut context, KeyCode::Right);
+            assert_eq!(game.vibration_level, expected);
+        }
+        press_left(&mut game, &mut context, KeyCode::Right);
+        assert_eq!(game.vibration_level, MAX_VIBRATION_LEVEL, "7 위로는 안 올라갑니다");
+    }
+
+    /// 방식을 바꿔도 단계가 유지되어야 합니다. 두 방식의 범위가 같기 때문입니다.
+    #[test]
+    fn switching_mode_keeps_the_level() {
+        let mut game = loaded_game();
+        let mut context = Context::new();
+        game.vibration_level = 2;
+
+        press_left(&mut game, &mut context, KeyCode::Down);
+        assert_eq!(game.vibration_mode, VibrationMode::BlinkPeriod);
+        assert_eq!(game.vibration_level, 2, "방식을 바꿔도 단계는 그대로여야 합니다");
+
+        press_left(&mut game, &mut context, KeyCode::Down);
+        assert_eq!(game.vibration_mode, VibrationMode::DutyRatio);
+        assert_eq!(game.vibration_level, 2);
     }
 
     /// 나가기는 **양쪽** Menu 모두에서 되어야 합니다.
@@ -1891,6 +2188,176 @@ mod tests {
         );
     }
 
+    /// 듀티비 모드의 각 단계가 실제로 몇 % 듀티가 되는지 고정합니다.
+    ///
+    /// 애플릿 → 런타임 → 펌웨어의 세 변환을 모두 재현합니다. 어느 한쪽이 바뀌면
+    /// 여기서 걸립니다. (사람이 손으로 계산하다 틀리는 걸 막기 위한 테스트입니다)
+    #[test]
+    fn duty_levels_are_spaced_by_12_5_percent() {
+        /// `runtime-native/src/hal/display/mod.rs` 의 `map_intensity_to_4bit`
+        fn to_4bit(value: u8) -> u8 {
+            ((value as u16 * 7 + 127) / 255) as u8
+        }
+
+        /// `firmware/src/braille_display.rs` 의 PWM 판정.
+        ///
+        /// `counter` 는 `PWM_STEP`(16) 씩 더해지는 `u8` 이라 0,16,…,240 의 16칸입니다.
+        /// 코드 1~6 은 `코드 * 32 > counter`, 0 은 항상 꺼짐, 7 은 항상 켜짐입니다.
+        fn duty_percent(code: u8) -> f32 {
+            match code {
+                0 => 0.0,
+                7 => 100.0,
+                c => {
+                    let high = (0..16).filter(|k| (c as u16) * 32 > k * 16).count();
+                    high as f32 / 16.0 * 100.0
+                }
+            }
+        }
+
+        let duties: Vec<f32> = (0..=MAX_VIBRATION_LEVEL)
+            .map(|level| duty_percent(to_4bit(level_to_value(level))))
+            .collect();
+
+        assert_eq!(
+            duties,
+            vec![0.0, 12.5, 25.0, 37.5, 50.0, 62.5, 75.0, 100.0],
+            "듀티 간격이 12.5% 가 아닙니다"
+        );
+
+        // 0~6 단계는 정확히 12.5% 씩 올라갑니다.
+        for w in duties[..=6].windows(2) {
+            assert!(
+                (w[1] - w[0] - 12.5).abs() < 1e-3,
+                "{w:?} 사이 간격이 12.5% 가 아닙니다"
+            );
+        }
+
+        // 7단계만 어긋납니다. 펌웨어가 코드 7 을 항상 켜짐으로 특수 처리하기 때문입니다.
+        assert_eq!(
+            duties[7] - duties[6],
+            25.0,
+            "7단계는 펌웨어 특수 처리로 75% → 100% 로 건너뜁니다"
+        );
+    }
+
+    /// 0단계는 **어느 화면에서도** 핀이 하나도 안 떠야 합니다.
+    /// (곡 표시용 점과 진행 막대는 진동이 아니므로 제외)
+    #[test]
+    fn level_zero_lights_no_pins() {
+        let size = Size::new(48, 32);
+
+        for mode in [VibrationMode::DutyRatio, VibrationMode::BlinkPeriod] {
+            // 곡 선택 화면
+            let mut game = loaded_game();
+            game.vibration_mode = mode;
+            game.vibration_level = 0;
+
+            let mut canvas = Canvas::new(size);
+            game.on_draw(&mut canvas).expect("on_draw 실패");
+            for y in 0..size.height - 2 {
+                for x in 0..size.width {
+                    assert_eq!(
+                        canvas.get_pin(Point::new(x, y)).value,
+                        0,
+                        "{mode:?} 0단계인데 곡 선택 화면 ({x},{y}) 에 핀이 떴습니다"
+                    );
+                }
+            }
+
+            // 연주 중, 예고가 한창일 때
+            let mut game = loaded_game();
+            game.vibration_mode = mode;
+            game.vibration_level = 0;
+            game.state = GameState::Playing;
+            let target = game.song().unwrap().notes[0];
+            game.now_s = target - 0.01;
+            game.visual = game.compute_visual(size.width);
+            assert_eq!(
+                game.visual.fill.value, 0,
+                "{mode:?} 0단계인데 진동 세기가 0 이 아닙니다"
+            );
+
+            let mut canvas = Canvas::new(size);
+            game.on_draw(&mut canvas).expect("on_draw 실패");
+            for y in 0..size.height - 2 {
+                for x in 0..size.width {
+                    assert_eq!(
+                        canvas.get_pin(Point::new(x, y)).value,
+                        0,
+                        "{mode:?} 0단계인데 연주 화면 ({x},{y}) 에 핀이 떴습니다"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 창은 **방식·단계와 무관하게 항상 예고 그대로**여야 합니다.
+    ///
+    /// 점멸의 낮은 단계는 주기가 창에 안 담겨 노트마다 떴다 안 떴다 하는데,
+    /// 그게 그 단계의 실제 한계이므로 창을 늘려 숨기지 않습니다.
+    /// 늘리면 단계마다 예고 길이가 달라져 게임 타이밍이 흔들립니다.
+    #[test]
+    fn the_window_is_always_the_lead_regardless_of_mode_or_level() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+        let lead = game.lead();
+        let on_at = target - lead - CUE_ADVANCE_S;
+
+        for mode in [VibrationMode::DutyRatio, VibrationMode::BlinkPeriod] {
+            // 0단계는 꺼짐이라 켜고 꺼짐을 볼 수 없습니다.
+            for level in 1..=MAX_VIBRATION_LEVEL {
+                game.vibration_mode = mode;
+                game.vibration_level = level;
+
+                game.now_s = on_at - 0.002;
+                assert_eq!(
+                    game.vibration_fill_with(mode),
+                    Intensity::OFF,
+                    "{mode:?} {level}단계: 예고 시작 전에는 꺼져 있어야 합니다"
+                );
+
+                game.now_s = on_at + 0.002;
+                assert!(
+                    game.vibration_fill_with(mode).value > 0,
+                    "{mode:?} {level}단계: 예고가 시작되면 켜져야 합니다"
+                );
+
+                game.now_s = target + 0.002;
+                assert_eq!(
+                    game.vibration_fill_with(mode),
+                    Intensity::OFF,
+                    "{mode:?} {level}단계: 노트를 지나면 꺼져야 합니다"
+                );
+            }
+        }
+    }
+
+    /// 듀티비 모드는 단계와 무관하게 창이 예고 그대로여야 합니다.
+    #[test]
+    fn duty_mode_never_widens_the_window() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+        let lead = game.lead();
+
+        // 0단계는 꺼짐이라 켜고 꺼짐을 볼 수 없습니다. 1단계부터 봅니다.
+        for level in 1..=MAX_VIBRATION_LEVEL {
+            game.vibration_level = level;
+            game.now_s = target - lead - CUE_ADVANCE_S - 0.01;
+            assert_eq!(
+                game.vibration_fill_with(VibrationMode::DutyRatio),
+                Intensity::OFF,
+                "{level}단계: 예고 시작 전에는 꺼져 있어야 합니다"
+            );
+            game.now_s = target - lead - CUE_ADVANCE_S + 0.01;
+            assert!(
+                game.vibration_fill_with(VibrationMode::DutyRatio).value > 0,
+                "{level}단계: 예고 시작 후에는 켜져 있어야 합니다"
+            );
+        }
+    }
+
     /// 점멸 주기 모드는 같은 단계를 깜빡임 플래그로 내보내야 합니다.
     /// 단계가 올라가면 강도값도 단조 증가합니다.
     #[test]
@@ -1908,7 +2375,7 @@ mod tests {
             values.push(fill.value);
         }
 
-        assert_eq!(values.len(), 7);
+        assert_eq!(values.len(), 8, "0~7 단계 여덟 개여야 합니다");
         assert_eq!(*values.last().unwrap(), 255, "7단계는 최대여야 합니다");
         assert!(
             values.windows(2).all(|w| w[0] < w[1]),
