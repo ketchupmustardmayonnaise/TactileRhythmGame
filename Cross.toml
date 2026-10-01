@@ -1,5 +1,11 @@
 [target.aarch64-unknown-linux-gnu]
 dockerfile = "Dockerfile.aarch64"
 
-[target.aarch64-unknown-linux-gnu.env]
-passthrough = ["XDG_CACHE_HOME"]
+# XDG_CACHE_HOME 은 passthrough 하지 않습니다.
+#
+# 이 값은 Dockerfile.aarch64 안에서 /target/cache 로 고정합니다.
+# 호스트 값을 그대로 넘기면 두 가지 문제가 생깁니다.
+#   1. Windows 의 MSYS 셸이 `/target/cache` 를 `C:/Program Files/Git/target/cache` 로 변환합니다.
+#   2. Linux/macOS 에서도 개발자가 XDG_CACHE_HOME 을 이미 설정해 두었다면
+#      컨테이너에 존재하지 않는 호스트 경로가 들어갑니다.
+# 어느 쪽이든 ort-sys 가 onnxruntime 프리빌트를 캐시하지 못하고 빌드가 실패합니다.

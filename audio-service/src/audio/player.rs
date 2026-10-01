@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use tokio::sync::Semaphore;
@@ -27,6 +27,8 @@ pub struct AudioPlayer {
     normal_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     /// TtsImportant
     important_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// 효과음 트랙이 하드웨어로 내보낸 누적 프레임 수 (재생 위치 조회용)
+    sound_effect_frames: Arc<AtomicU64>,
     // SoundEffect <- 나중에 볼륨조절 로직으로추가. 더킹으로 합성할꺼면 그냥 deploy시 그냥 wav나 pcm으로 만들거나 소리 크기별로 만들어놔도 될듯.
 }
 
@@ -40,6 +42,10 @@ impl AudioPlayer {
     /// 새로운 오디오 재생기 인스턴스를 정상 구축하고, 하드웨어 음향 출력 백그라운드 스레드를 즉시 시동합니다.
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
+
+        // 효과음 재생 위치 카운터. 오디오 스레드와 HTTP 핸들러가 함께 참조합니다.
+        let sound_effect_frames = Arc::new(AtomicU64::new(0));
+        let sound_effect_frames_thread = sound_effect_frames.clone();
 
         // 오디오 스레드 외부(초기화하는 메인 시점)에서 사운드 카드의 실제 물리적 오디오 장치 기본 샘플 레이트를 미리 조회해 둡니다.
         let host = cpal::default_host();
@@ -105,6 +111,7 @@ impl AudioPlayer {
                             is_playing: is_playing_ref.clone(),
                             ducking_multiplier: 1.0,
                             sample_rate: target_sample_rate,
+                            sound_effect_frames: sound_effect_frames_thread.clone(),
                         };
                         dev.build_output_stream(
                             cfg.clone(),
@@ -122,6 +129,7 @@ impl AudioPlayer {
                             is_playing: is_playing_ref.clone(),
                             ducking_multiplier: 1.0,
                             sample_rate: target_sample_rate,
+                            sound_effect_frames: sound_effect_frames_thread.clone(),
                         };
                         dev.build_output_stream(
                             cfg.clone(),
@@ -139,6 +147,7 @@ impl AudioPlayer {
                             is_playing: is_playing_ref.clone(),
                             ducking_multiplier: 1.0,
                             sample_rate: target_sample_rate,
+                            sound_effect_frames: sound_effect_frames_thread.clone(),
                         };
                         dev.build_output_stream(
                             cfg.clone(),
@@ -230,6 +239,7 @@ impl AudioPlayer {
             // active_tasks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             normal_tasks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             important_tasks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            sound_effect_frames,
         }
     }
 
@@ -416,6 +426,27 @@ impl AudioPlayer {
         self.tx
             .send(AudioCommand::Clear(category))
             .map_err(|_| Error::AudioDeviceNotFound(vec![]))
+    }
+
+    /// 효과음 재생 위치를 즉시 0 으로 되돌립니다.
+    ///
+    /// 재생 명령은 채널을 통해 오디오 스레드로 전달되므로 실제 반영까지 몇 ms 가 걸립니다.
+    /// 그 사이 `GET /position` 이 **직전 효과음의 마지막 위치**를 돌려주면
+    /// 애플릿이 그것을 새 곡의 위치로 오인할 수 있으므로, 요청을 받은 즉시 여기서 끊어 둡니다.
+    pub fn reset_sound_effect_position(&self) {
+        self.sound_effect_frames.store(0, Ordering::Release);
+    }
+
+    /// 효과음(SoundEffect) 트랙이 실제로 재생한 시간(초)을 돌려줍니다.
+    ///
+    /// 재생 요청 직후에는 0 이고, 디코딩이 끝나 첫 샘플이 하드웨어로 나가기 시작하면 증가합니다.
+    /// 리듬 게임처럼 음악과 타이밍을 맞춰야 하는 애플릿이 자신의 시계를 여기에 동기화합니다.
+    pub fn sound_effect_position_secs(&self) -> f64 {
+        let frames = self.sound_effect_frames.load(Ordering::Relaxed);
+        if self.sample_rate <= 0.0 {
+            return 0.0;
+        }
+        frames as f64 / self.sample_rate as f64
     }
 
     /// 전반적인 시스템의 마스터 혼합 출력 음량 볼륨 폭을 조절합니다

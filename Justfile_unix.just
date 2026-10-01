@@ -271,8 +271,9 @@ build-audio-service: _check-rust
 # Build the Audio service (Release, aarch64)
 [group('⚙️ Build (Release)')]
 build-audio-service-aarch64: _check-rust _check-container-runtime _install-cross
+    # XDG_CACHE_HOME 은 Dockerfile.aarch64 안에서 /target/cache 로 지정합니다.
+    # 호스트에서 넘기면 Windows 의 MSYS 셸이 경로를 변환해 버려 컨테이너에서 깨집니다.
     ulimit -n 65536 2>/dev/null || true; \
-    XDG_CACHE_HOME=/target/cache \
     CARGO_TARGET_DIR={{cross_target_dir}} \
     cross build --package audio-service --release --target aarch64-unknown-linux-gnu
 

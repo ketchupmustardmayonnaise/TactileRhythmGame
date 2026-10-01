@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use crate::audio::types::PlaybackCategory;
 
@@ -30,4 +30,13 @@ pub(crate) struct AudioState {
     pub(crate) ducking_multiplier: f32,
     /// 현재 초기화되어 사용 중인 물리 오디오 장비의 출력 주파수 샘플 레이트 (Hz)
     pub(crate) sample_rate: f32,
+    /// 효과음(SoundEffect) 트랙이 실제로 하드웨어로 내보낸 누적 프레임 수입니다.
+    ///
+    /// 새 효과음이 시작되거나 트랙이 비워질 때 0 으로 초기화됩니다.
+    /// `GET /position` 이 이 값을 초 단위로 환산해 돌려주며, 리듬 게임 애플릿이
+    /// 자신의 게임 시계를 실제 음악 재생 위치에 맞추는 데 사용합니다.
+    ///
+    /// 재생 요청부터 첫 샘플이 나가기까지는 디코딩 시간만큼(기기에서 약 180ms) 지연이 있는데,
+    /// 이 값을 기준으로 삼으면 그 지연을 추측하지 않고 정확히 흡수할 수 있습니다.
+    pub(crate) sound_effect_frames: Arc<AtomicU64>,
 }

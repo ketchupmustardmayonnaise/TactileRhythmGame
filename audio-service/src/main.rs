@@ -69,6 +69,7 @@ async fn main() -> Result<()> {
     // 5. 웹 서버 설정
     let app = Router::new()
         .route("/", get(root))
+        .route("/position", get(handle_position))
         .route("/sound", post(handle_sound))
         .route("/audio_segments", post(handle_audio_segments))
         .route("/volume", post(handle_set_volume))
@@ -87,6 +88,20 @@ async fn main() -> Result<()> {
 
 async fn root() -> &'static str {
     "TTS Service is running (Modular Structure)."
+}
+
+/// 현재 효과음(SoundEffect) 트랙의 재생 경과 시간을 초 단위로 반환합니다.
+///
+/// 재생 요청을 보낸 시점과 실제로 첫 샘플이 스피커로 나가는 시점 사이에는
+/// 디코딩·리샘플링 시간만큼 지연이 있습니다(CM5 기준 약 180ms, PC 는 더 짧음).
+/// 애플릿이 요청 시점부터 자체 시계를 돌리면 그만큼 음악보다 앞서게 되므로,
+/// 이 엔드포인트로 **실제 재생 위치**를 읽어 시계를 맞출 수 있게 합니다.
+///
+/// 아직 재생이 시작되지 않았으면 `0.0` 입니다.
+async fn handle_position(State(state): State<AppState>) -> impl IntoResponse {
+    axum::Json(serde_json::json!({
+        "seconds": state.audio_player.sound_effect_position_secs(),
+    }))
 }
 
 async fn get_tts_audio_data(
@@ -361,6 +376,9 @@ async fn handle_sound(
         query.volume
     );
     // 이전 효과음들을 명시적으로 청소한 뒤 새 효과음을 즉각 재생합니다.
+    // 재생 위치는 오디오 스레드를 기다리지 않고 여기서 곧바로 0 으로 끊어,
+    // /position 이 직전 효과음의 잔여 위치를 돌려주지 않게 합니다.
+    state.audio_player.reset_sound_effect_position();
     state.audio_player.clear(PlaybackCategory::SoundEffect)?;
     let volume = if query.volume.is_nan() { 1.0 } else { query.volume };
     state.audio_player.play(

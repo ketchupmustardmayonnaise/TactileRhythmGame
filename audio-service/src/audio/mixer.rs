@@ -67,12 +67,19 @@ pub(crate) fn process_stream_commands(state: &mut AudioState, rx: &mpsc::Receive
                         volume,
                         // volume: track_volume,
                     });
+                    // 새 효과음이 시작되면 재생 위치 카운터를 0 부터 다시 셉니다.
+                    if is_effect {
+                        state.sound_effect_frames.store(0, Ordering::Release);
+                    }
                     state.is_playing.store(true, Ordering::Release);
                 }
             }
             StreamCommand::Clear(category) => {
                 // 특정 카테고리에 속하는 대기/연주 트랙들을 완전히 소거합니다.
                 state.tracks.retain(|t| t.category != category);
+                if category == PlaybackCategory::SoundEffect {
+                    state.sound_effect_frames.store(0, Ordering::Release);
+                }
             }
             StreamCommand::SetVolume(volume) => {
                 // 마스터 시스템 볼륨 값을 조정합니다.
@@ -92,6 +99,12 @@ pub(crate) fn next_sample(state: &mut AudioState) -> f32 {
         .tracks
         .iter()
         .any(|t| t.category == PlaybackCategory::TtsImportant);
+
+    // 효과음(= 리듬 게임의 음악) 트랙이 실제로 재생 중인지 여부. 재생 위치 누적에 사용합니다.
+    let has_effect = state
+        .tracks
+        .iter()
+        .any(|t| t.category == PlaybackCategory::SoundEffect);
 
     // 더킹 목표 볼륨을 안전하게 선언합니다. 중요 안내음이 들릴 때는 다른 카테고리의 소리를 20%(0.2) 수준으로 낮춥니다.
     let ducking_target = if has_important { 0.2 } else { 1.0 };
@@ -157,6 +170,12 @@ pub(crate) fn next_sample(state: &mut AudioState) -> f32 {
         } else {
             i += 1;
         }
+    }
+
+    // 효과음 트랙이 실제로 소리를 내보낸 프레임 수를 누적합니다.
+    // `next_sample` 은 프레임당 한 번 호출되므로 이 값을 샘플레이트로 나누면 재생 경과 시간이 됩니다.
+    if has_effect {
+        state.sound_effect_frames.fetch_add(1, Ordering::Relaxed);
     }
 
     // 더 이상 연주할 소리 조각이 없다면 활성화 플래그를 원자적으로 정상 해제합니다.

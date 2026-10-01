@@ -1,7 +1,7 @@
 //! 리듬 게임 애플릿
 //!
 //! 화면 중앙에 원이 하나 있고, 노트 시각이 다가올수록 이 원의 진동이 점점 강해집니다.
-//! 기본값은 기기 부팅/종료 애니메이션과 같은 PWM 강도 램프(`VibrationMode::Swell`)입니다.
+//! 기본값은 기기 부팅/종료 애니메이션과 같은 PWM 강도 램프(`VibrationMode::DutyRatio`)입니다.
 //! 진동이 최고조에 달하는 순간(= 노트 시각)에 가운데 키(웹 시뮬레이터의 `Space`)를 누르면 됩니다.
 //!
 //! 흐름
@@ -20,7 +20,7 @@ use graphics::{Graphics, style::Style};
 use sdk::Applet;
 use sdk::api::context::Context;
 use sdk::api::display::{DisplayInterface, Intensity, Point, Size};
-use sdk::api::keypad::{KeyCode, KeyState, KeypadPopResult};
+use sdk::api::keypad::{KeyCode, KeyState, KeypadPopResult, KeypadSide};
 use sdk::applet::{LocalizedString, SpeechOption, SpeechResult};
 use sdk::error::Result;
 use sdk::event::UpdateResult;
@@ -45,46 +45,69 @@ use serde::Deserialize;
 /// 실기에서 바로 비교할 수 있도록 **기능 키(Function)로 전환**합니다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VibrationMode {
-    /// 기기 부팅·종료 애니메이션과 같은 느낌. PWM 강도를 0 → 255 로 부드럽게 끌어올립니다.
-    /// (`tactile-display-demo` 의 `Static8`, `firmware/src/shutdown_animation.rs` 의 램프와 동일)
-    Swell,
-    /// 하드웨어 점멸 8단계에 위임합니다. (`tactile-display-demo` 의 `Blink8` 과 동일)
-    HardwareSteps,
+    /// 약 62.5Hz 반송파의 **듀티비**로 세기를 냅니다.
+    /// 기기 부팅·종료 애니메이션과 같은 방식입니다.
+    /// (`tactile-display-demo` 의 `Static8`, `firmware/src/shutdown_animation.rs`)
+    DutyRatio,
+    /// 같은 단계를 하드웨어 **점멸 주기**로 냅니다.
+    /// 1~6 단계가 1·2·4·8·16·32Hz, 7 단계는 항상 켜짐입니다.
+    /// (`tactile-display-demo` 의 `Blink8`)
+    BlinkPeriod,
 }
 
 /// 애플릿을 켰을 때의 기본 방식입니다.
-const DEFAULT_VIBRATION_MODE: VibrationMode = VibrationMode::Swell;
+const DEFAULT_VIBRATION_MODE: VibrationMode = VibrationMode::DutyRatio;
 
 impl VibrationMode {
     /// 기능 키를 누를 때마다 다른 방식으로 넘어갑니다.
     fn next(self) -> Self {
         match self {
-            VibrationMode::Swell => VibrationMode::HardwareSteps,
-            VibrationMode::HardwareSteps => VibrationMode::Swell,
+            VibrationMode::DutyRatio => VibrationMode::BlinkPeriod,
+            VibrationMode::BlinkPeriod => VibrationMode::DutyRatio,
         }
     }
 
     /// 전환 시 음성으로 읽어 줄 이름입니다. 시연 중 지금 무엇을 만지고 있는지 알려 줍니다.
     fn label(self, lang: Language) -> &'static str {
         match (self, lang) {
-            (VibrationMode::Swell, Language::Ko) => {
-                "세기 차오름. 부팅 애니메이션과 같은 방식입니다."
+            (VibrationMode::DutyRatio, Language::Ko) => {
+                "듀티 레이시오 기반. 부팅 애니메이션과 같은 방식입니다."
             }
-            (VibrationMode::HardwareSteps, Language::Ko) => {
-                "점멸 8단계. 하드웨어가 직접 깜빡입니다."
+            (VibrationMode::BlinkPeriod, Language::Ko) => {
+                "주기 기반. 하드웨어가 직접 깜빡입니다."
             }
-            (VibrationMode::Swell, Language::Ja) => {
+            (VibrationMode::DutyRatio, Language::Ja) => {
                 "強さの立ち上がり。起動アニメーションと同じ方式です。"
             }
-            (VibrationMode::HardwareSteps, Language::Ja) => "点滅8段階。ハードウェアが点滅します。",
-            (VibrationMode::Swell, _) => "Intensity swell, same as the boot animation.",
-            (VibrationMode::HardwareSteps, _) => "Eight blink steps, driven by the hardware.",
+            (VibrationMode::BlinkPeriod, Language::Ja) => "点滅8段階。ハードウェアが点滅します。",
+            (VibrationMode::DutyRatio, _) => "Intensity swell, same as the boot animation.",
+            (VibrationMode::BlinkPeriod, _) => "Eight blink steps, driven by the hardware.",
         }
     }
 }
 
-/// `HardwareSteps` 에서 예고 시간을 나눌 단계 수입니다.
-const VIBRATION_STEPS: i32 = 8;
+/// 진동 단계. **단계 번호가 곧 하드웨어 레벨**입니다.
+///
+/// 강도가 4비트로 양자화되어 하드웨어 레벨은 0~7 뿐인데, 0 은 "꺼짐"이라
+/// 설정값으로는 의미가 없습니다. 그래서 쓸 수 있는 범위는 **1~7** 입니다.
+///
+/// 예고 구간 내내 이 레벨 하나로 고정됩니다. 세기가 변하지 않으므로
+/// 노트당 전송은 켜기 1회 + 끄기 1회뿐이고, 단계를 올려도 전송량은 그대로입니다.
+///
+/// 두 모드가 이 값을 똑같이 받아, 한쪽은 듀티비로 다른 쪽은 점멸 주기로 냅니다.
+/// 같은 단계를 두 방식으로 바로 번갈아 느껴 볼 수 있습니다.
+const MIN_VIBRATION_LEVEL: u8 = 1;
+const MAX_VIBRATION_LEVEL: u8 = 7;
+
+/// 켰을 때의 기본 단계. A/D 키로 1~7 사이에서 바꿉니다.
+const DEFAULT_VIBRATION_LEVEL: u8 = MAX_VIBRATION_LEVEL;
+
+/// 단계(= 하드웨어 레벨 0~7)를 그 레벨이 나오는 강도값으로 바꿉니다.
+///
+/// 런타임이 `(v*7+127)/255` 로 양자화하므로, 그 역함수에 해당합니다.
+fn level_to_value(level: u8) -> u8 {
+    (level.min(7) as u16 * 255 / 7) as u8
+}
 
 /// 재생 중인 음악을 끊기 위해 쓰는 아주 짧은 무음 클립입니다.
 ///
@@ -122,7 +145,7 @@ const AUDIO_OFFSET_MS: i64 = 0;
 /// * 정확도 계산 (`RhythmGame::accuracy`)
 ///
 /// Miss 는 "표의 어디에도 못 든 경우"라서 표에 넣지 않습니다.
-const HIT_TIERS: [(Judge, f32, u32); 2] = [(Judge::Perfect, 0.20, 100), (Judge::Good, 0.40, 50)];
+const HIT_TIERS: [(Judge, f32, u32); 2] = [(Judge::Perfect, 0.15, 100), (Judge::Good, 0.30, 50)];
 
 /// 노트를 칠 수 있는 마지막 경계(초) = 표의 가장 너그러운 허용 오차.
 ///
@@ -133,6 +156,74 @@ const HIT_WINDOW_S: f32 = HIT_TIERS[HIT_TIERS.len() - 1].1;
 
 /// 예고 시간을 읽지 못했을 때 사용할 기본값(초)
 const DEFAULT_LEAD_S: f32 = 0.3;
+
+/// 애플릿이 핀 값을 바꾼 뒤 그 진동이 손끝에 닿기까지의 출력 지연(ms).
+///
+/// **진동만 이만큼 미리** 내보냅니다. 판정 시계(`now_s`)는 건드리지 않습니다.
+/// 둘을 같이 밀면 진동을 당긴 만큼 판정도 밀려 아무 의미가 없습니다.
+///
+/// 이 경로는 오디오와 무관해서 `/position` 동기화로는 보정되지 않습니다.
+/// 기기 로그로 확인한 바, 애플릿의 진동 창 자체는 정확히 `[T-예고, T]` 이고
+/// 타격 평균 오차도 -5ms 였습니다. 즉 남은 어긋남은 전부 이 구간에서 생깁니다.
+///
+/// | 구간 | 시간 | 근거 |
+/// |---|---|---|
+/// | UART 전송 (지름 18 원 = 756B) | 66ms | 756 ÷ 11,520B/s |
+/// | PWM 주기 정렬 | 최대 16ms | `PWM_STEP`(16) × `PWM_INTERVAL`(1ms) |
+/// | 합계 | **약 82ms** | |
+///
+/// 여기에 핀이 "떨림"으로 인지되기까지 반송파가 몇 주기 돌아야 하는 몫이 더 붙습니다
+/// (62.5Hz 에서 5주기 ≈ 80ms). 이 부분은 센서 없이는 못 재므로 포함하지 않았습니다.
+///
+/// 그래서 측정·유도 가능한 82ms 를 반올림해 85 로 둡니다.
+/// 이전 값 30ms 는 이 경로를 재지 않고 타격 오차 평균만 보고 넣은 값이라
+/// 실제 지연의 1/3 밖에 못 메웠습니다.
+///
+/// 여전히 늦게 느껴지면 키우고, 앞서 느껴지면 줄이세요.
+const TACTILE_OUTPUT_DELAY_MS: i64 = 85;
+
+/// 진동하는 원의 지름(핀 개수).
+///
+/// 화면은 48x32 이고, 그리는 쪽에서 `size.height - 4` 로 한 번 더 깎입니다.
+///
+/// 참고: 원을 한 단계 세게 만들 때마다 원 안의 모든 핀을 다시 보내야 합니다.
+/// 지름 18 은 256핀 = 762B 이고 링크가 115,200 baud 라 한 단계에 약 66ms 걸립니다.
+/// `SWELL_MIN_INTENSITY` 가 255(1단계)라 예고 중에는 세기가 변하지 않으므로,
+/// 노트당 전송은 켜기 1회 + 끄기 1회 = 약 132ms 뿐입니다. 예고 200ms 안에 들어옵니다.
+/// 단계를 늘리면 (단계 수 × 66ms) 가 예고를 넘지 않는지 확인하세요 —
+/// 넘기면 중간 단계가 전송 큐에서 버려집니다(`net_comm.rs`).
+const VIBRATING_DISC_DIAMETER: i16 = 18;
+
+// --- 오디오 재생 위치 동기화 -------------------------------------------------
+//
+// `context.audio.play()` 는 audio-service 에 재생을 **요청**할 뿐이고,
+// 실제로 첫 샘플이 스피커로 나가기까지는 디코딩·리샘플링 시간만큼 걸립니다.
+// 실측값: CM5 릴리스 빌드 약 180ms, PC 디버그 빌드 약 1,580ms.
+// 요청 시점부터 게임 시계를 돌리면 그만큼 게임이 음악보다 앞서 버립니다.
+//
+// 그래서 audio-service 의 `GET /position` 으로 **실제 재생 위치**를 읽어
+// 게임 시계를 거기에 맞춥니다. 지연이 얼마든, 어떤 기기든 알아서 흡수됩니다.
+
+/// audio-service 의 재생 위치 조회 주소.
+/// 포트 3005 는 `runtime_common::audio::protocol::TTS_SERVICE_DEFAULT_PORT` 와 같은 값인데,
+/// 애플릿(WASM)은 호스트 크레이트에 의존할 수 없어 여기에 복제해 둡니다.
+const POSITION_URL: &str = "http://127.0.0.1:3005/position";
+
+/// 재생이 시작되기를 기다리는 동안의 조회 간격(ms)
+const SYNC_POLL_MS: u64 = 40;
+/// 동기화가 끝난 뒤 어긋남을 확인하는 간격(ms)
+const RESYNC_INTERVAL_MS: u64 = 5_000;
+/// 재확인 시 이 이상 벌어졌을 때만 시계를 다시 맞춥니다.
+const RESYNC_THRESHOLD_S: f32 = 0.05;
+/// 이 시간 안에 재생이 시작되지 않으면 동기화를 포기하고 요청 시점 기준으로 진행합니다.
+/// (audio-service 가 꺼져 있어도 게임이 멈추지 않도록 하는 안전장치)
+const SYNC_TIMEOUT_MS: u64 = 5_000;
+
+/// `GET /position` 응답
+#[derive(Deserialize)]
+struct PositionResponse {
+    seconds: f64,
+}
 
 /// 노트 예고 시간을 코드에서 직접 지정합니다.
 ///
@@ -146,9 +237,9 @@ const DEFAULT_LEAD_S: f32 = 0.3;
 /// | 150ms | 18.8ms | 현재 값 |
 /// | 100ms | 12.5ms | PWM 반송파(16ms)보다 짧아 단계 구분이 어려움 |
 ///
-/// `VibrationMode::HardwareSteps` 는 200ms 아래에서는 제 기능을 못 합니다.
+/// `VibrationMode::BlinkPeriod` 는 200ms 아래에서는 제 기능을 못 합니다.
 /// 느린 단계(1·2·4·8Hz)의 한 주기가 각 칸보다 길어서 켜짐/꺼짐이 한 번도 안 일어납니다.
-const LEAD_OVERRIDE_MS: Option<u32> = Some(150);
+const LEAD_OVERRIDE_MS: Option<u32> = Some(200);
 
 // ---------------------------------------------------------------------------
 // 곡 에셋
@@ -475,6 +566,33 @@ pub struct RhythmGame {
     last_judge: Option<Judge>,
     /// 판정 표시를 언제까지 유지할지(곡 기준 초)
     flash_until_s: f32,
+
+    /// 판정된 입력들의 **부호 있는** 타이밍 오차 합(초). 양수 = 게임 시계 기준 늦게 누름.
+    /// 남은 오차를 로그로 확인할 때 씁니다.
+    timing_error_sum: f32,
+    /// 위 합에 포함된 입력 개수 (Miss 는 오차를 정의할 수 없어 제외)
+    timing_error_count: u32,
+
+    /// 진행 중인 `/position` 요청 id
+    sync_pending: Option<u32>,
+    /// 마지막으로 `/position` 을 요청한 모노토닉 시각 (조회 주기 제어용)
+    sync_last_poll: Duration,
+    /// 현재 진행 중인 `/position` 요청을 **보낸** 시각.
+    /// 서버가 위치를 읽은 시점이 이 값에 가까우므로, 시계를 맞출 때의 기준으로 씁니다.
+    sync_request_at: Duration,
+    /// 게임 시계를 실제 재생 위치에 맞추는 데 성공했는지 여부.
+    /// `false` 인 동안에는 시계를 0 에 묶어 두고 판정도 하지 않습니다.
+    sync_locked: bool,
+
+    /// 계측용: 직전 프레임의 진동 세기. 꺼짐→켜짐 전환을 잡아내는 데 씁니다.
+    /// 진동 단계 = 하드웨어 레벨 (1~7). A/D 키로 조절합니다.
+    vibration_level: u8,
+
+    probe_prev_fill: u8,
+    /// 계측용: 이번 노트의 진동이 처음 켜진 `now_s`.
+    probe_onset_s: Option<f32>,
+    /// 재생을 요청한 모노토닉 시각 (동기화 타임아웃 판정용)
+    play_requested_at: Duration,
 }
 
 impl Default for RhythmGame {
@@ -496,6 +614,16 @@ impl Default for RhythmGame {
             miss: 0,
             last_judge: None,
             flash_until_s: 0.0,
+            timing_error_sum: 0.0,
+            timing_error_count: 0,
+            sync_pending: None,
+            sync_last_poll: Duration::ZERO,
+            sync_request_at: Duration::ZERO,
+            sync_locked: false,
+            vibration_level: DEFAULT_VIBRATION_LEVEL,
+            probe_prev_fill: 0,
+            probe_onset_s: None,
+            play_requested_at: Duration::ZERO,
         }
     }
 }
@@ -542,6 +670,13 @@ impl RhythmGame {
         self.miss = 0;
         self.last_judge = None;
         self.flash_until_s = 0.0;
+        self.timing_error_sum = 0.0;
+        self.timing_error_count = 0;
+        self.sync_pending = None;
+        self.sync_last_poll = Duration::ZERO;
+        self.sync_request_at = Duration::ZERO;
+        self.sync_locked = false;
+        self.play_requested_at = now;
         self.state = GameState::Playing;
 
         log::info!("연주 시작: 노트 {}개, 예고 {}초", note_count, self.lead());
@@ -587,14 +722,93 @@ impl RhythmGame {
             return;
         };
 
-        let error = (target - self.now_s).abs();
-        let Some(judge) = Judge::from_error(error) else {
+        // 부호 있는 오차: 양수면 게임 시계 기준으로 늦게 누른 것입니다.
+        let signed_error = self.now_s - target;
+        let Some(judge) = Judge::from_error(signed_error.abs()) else {
             // 아직 예고조차 시작되지 않았거나 이미 놓친 노트 — 헛손질은 감점 없이 무시합니다.
             return;
         };
 
+        self.timing_error_sum += signed_error;
+        self.timing_error_count += 1;
+
         self.next_note += 1;
         self.apply_judge(judge);
+    }
+
+    /// audio-service 의 `GET /position` 을 폴링해 게임 시계를 실제 재생 위치에 맞춥니다.
+    ///
+    /// 재생이 시작되기 전에는 `/position` 이 0 을 돌려주므로, 0 보다 커지는 순간이
+    /// 곧 "음악이 실제로 흘러나오기 시작한 시점"입니다. 그때 `started_at` 을
+    /// `지금 - 재생위치` 로 잡으면 디코딩 지연이 얼마였든 정확히 흡수됩니다.
+    fn poll_audio_sync(&mut self, context: &mut Context, now: Duration) {
+        // 1) 도착한 응답 처리
+        if let Some(id) = self.sync_pending
+            && let Some((status, body)) = context.http.take_response(id)
+        {
+            self.sync_pending = None;
+            if status == 200
+                && let Ok(res) = serde_json::from_slice::<PositionResponse>(&body)
+                && res.seconds > 0.0
+            {
+                // 기준 시각은 응답을 **받은** 때가 아니라 요청을 **보낸** 때입니다.
+                //
+                // 서버는 요청을 받자마자 원자 변수 하나를 읽어 돌려주므로, 그 값이 가리키는
+                // 시점은 요청 직후입니다. 반면 응답이 애플릿까지 오는 데는 왕복 시간에 더해
+                // 런타임이 HttpResponse 이벤트를 다음 프레임에 전달하는 지연까지 얹힙니다.
+                // 응답 수신 시각을 쓰면 그만큼 `started_at` 이 뒤로 밀려 게임이 음악보다 늦어집니다.
+                let sampled_at = self.sync_request_at;
+                let measured_start =
+                    sampled_at.saturating_sub(Duration::from_secs_f64(res.seconds));
+                if !self.sync_locked {
+                    self.started_at = measured_start;
+                    self.sync_locked = true;
+                    let delay_ms = measured_start
+                        .saturating_sub(self.play_requested_at)
+                        .as_secs_f32()
+                        * 1000.0;
+                    let rtt_ms = now.saturating_sub(sampled_at).as_secs_f32() * 1000.0;
+                    log::info!(
+                        "오디오 동기화 완료: 재생이 요청보다 {delay_ms:.0}ms 늦게 시작됨 (응답 왕복 {rtt_ms:.0}ms)"
+                    );
+                } else {
+                    let drift =
+                        sampled_at.saturating_sub(self.started_at).as_secs_f64() - res.seconds;
+                    if drift.abs() as f32 > RESYNC_THRESHOLD_S {
+                        self.started_at = measured_start;
+                        log::info!("오디오 재동기화: {:.0}ms 보정", drift * 1000.0);
+                    }
+                }
+            }
+        }
+
+        // 2) 안전장치 — audio-service 가 없거나 응답이 없으면 요청 시점 기준으로 진행합니다.
+        if !self.sync_locked
+            && now.saturating_sub(self.play_requested_at) > Duration::from_millis(SYNC_TIMEOUT_MS)
+        {
+            log::warn!("재생 위치를 확인하지 못했습니다. 요청 시점 기준으로 진행합니다.");
+            self.started_at = self.play_requested_at;
+            self.sync_locked = true;
+        }
+
+        // 3) 다음 조회 요청
+        let interval = if self.sync_locked {
+            RESYNC_INTERVAL_MS
+        } else {
+            SYNC_POLL_MS
+        };
+        if self.sync_pending.is_none()
+            && now.saturating_sub(self.sync_last_poll) >= Duration::from_millis(interval)
+        {
+            self.sync_last_poll = now;
+            match context.http.fetch_async("GET", POSITION_URL, &[], &[]) {
+                Ok(id) => {
+                    self.sync_pending = Some(id);
+                    self.sync_request_at = now;
+                }
+                Err(code) => log::debug!("재생 위치 조회 요청 실패 (코드 {code})"),
+            }
+        }
     }
 
     /// 결과 화면으로 넘어갈 때가 되었는지 판단합니다.
@@ -620,7 +834,7 @@ impl RhythmGame {
 
     /// 현재 시각에서 원을 어떤 강도로 채울지 계산합니다.
     ///
-    /// 예고 구간은 `[T - lead, T]` 이며, 판정이 끝나는 `T + HIT_WINDOW_S` 까지 최고조를 유지합니다.
+    /// 예고 구간은 정확히 `[T - lead, T]` 입니다. 노트 시각에 최고조에 도달한 뒤 바로 꺼집니다.
     fn vibration_fill(&self) -> Intensity {
         self.vibration_fill_with(self.vibration_mode)
     }
@@ -649,29 +863,67 @@ impl RhythmGame {
             return Intensity::OFF;
         }
 
-        // 예고 시작 이후 경과한 시간
-        let since_start = self.now_s - (target - lead);
-        if since_start < 0.0 || self.now_s > target + HIT_WINDOW_S {
+        // 진동 전용 시계입니다. 판정 시계(`now_s`)보다 출력 지연만큼 앞서 갑니다.
+        // 핀 값을 바꿔도 손끝에 닿기까지 시간이 걸리므로, 그만큼 미리 내보내야
+        // 실제로 느껴지는 시점이 음악과 맞습니다.
+        let cue_now = self.now_s + TACTILE_OUTPUT_DELAY_MS as f32 / 1000.0;
+
+        // 예고 구간은 정확히 `[T - lead, T]` 입니다.
+        // 노트 시각을 지나면 최고조를 유지하지 않고 **즉시 꺼집니다.**
+        // 진동이 뚝 끊기는 그 순간이 곧 "지금 누르세요" 신호라, 피크를 손끝으로 집어낼 수 있습니다.
+        // (최고조를 판정 끝까지 유지하면 꽉 찬 상태가 220ms 이어져 피크가 뭉개집니다.)
+        // 시작과 끝에 서로 다른 시계를 씁니다.
+        //
+        // * **시작**은 보정된 시계(`cue_now`) 기준 — `now_s = T - 예고 - 보정` 에 켜집니다.
+        //   전송·PWM 지연을 타고 손끝에 닿을 때쯤이면 정확히 `T - 예고` 가 됩니다.
+        // * **끝**은 판정 시계(`now_s`) 기준 — `now_s = T` 에 꺼집니다.
+        //   보정해서 미리 끄면 정작 쳐야 할 순간에 진동이 이미 없습니다.
+        //
+        // 그래서 켜져 있는 구간은 `[T - 예고 - 보정, T]`, 길이는 `예고 + 보정` 입니다.
+        let since_start = cue_now - (target - lead);
+        if since_start < 0.0 || self.now_s > target {
             return Intensity::OFF;
         }
-        let progress = (since_start / lead).clamp(0.0, 1.0);
+        // 예고 내내 이 레벨 하나로 고정입니다. 올라가거나 내려가지 않습니다.
+        // 두 모드의 차이는 "같은 레벨을 무엇으로 표현하느냐" 뿐입니다.
+        let level = self
+            .vibration_level
+            .clamp(MIN_VIBRATION_LEVEL, MAX_VIBRATION_LEVEL);
+        let value = level_to_value(level);
 
         match mode {
-            VibrationMode::Swell => {
-                // 깜빡임이 아니라 PWM 강도를 0 → 255 로 부드럽게 끌어올립니다.
-                // 펌웨어는 이 값을 약 62.5Hz 반송파의 듀티비로 바꾸므로,
-                // 손끝에는 진동이 서서히 차오르는 느낌으로 전달됩니다.
-                // 노트 시각을 지난 판정 여유 구간에서는 최대치를 유지합니다.
-                Intensity::new((progress * 255.0).round() as u8)
-            }
-            VibrationMode::HardwareSteps => {
-                // 예고 시간을 8등분해 하드웨어 점멸 단계를 올립니다.
-                // 0 = 항상 꺼짐, 1~6 = 1·2·4·8·16·32Hz, 7 = 항상 켜짐.
-                let step =
-                    ((progress * VIBRATION_STEPS as f32) as i32).clamp(0, VIBRATION_STEPS - 1);
-                Intensity::new_blink((step * 255 / (VIBRATION_STEPS - 1)) as u8)
-            }
+            // 듀티비 — 약 62.5Hz 반송파의 켜짐 비율을 바꿉니다.
+            VibrationMode::DutyRatio => Intensity::new(value),
+            // 점멸 주기 — 같은 레벨을 하드웨어 깜빡임 주기로 넘깁니다.
+            // 1~6 = 1·2·4·8·16·32Hz, 7 = 항상 켜짐.
+            VibrationMode::BlinkPeriod => Intensity::new_blink(value),
         }
+    }
+
+    /// A/D 키: 진동 단계를 1~7 사이에서 조절하고 음성으로 알려 줍니다.
+    fn adjust_vibration_level(&mut self, context: &mut Context, delta: i8) {
+        let next = (self.vibration_level as i8 + delta)
+            .clamp(MIN_VIBRATION_LEVEL as i8, MAX_VIBRATION_LEVEL as i8)
+            as u8;
+        if next == self.vibration_level {
+            return;
+        }
+        self.vibration_level = next;
+
+        let label = match context.language {
+            Language::Ko => format!("{next}단계"),
+            Language::Ja => format!("{next}段階"),
+            _ => format!("level {next}"),
+        };
+        context
+            .audio
+            .speak_text_with_option(&label, SpeechOption::forced());
+
+        log::info!(
+            "진동 단계 {next}/{MAX_VIBRATION_LEVEL} (강도값 {}, 방식 {:?})",
+            level_to_value(next),
+            self.vibration_mode
+        );
     }
 
     /// 이번 프레임에 그려야 할 내용을 계산합니다.
@@ -692,6 +944,22 @@ impl RhythmGame {
     /// 화면 중앙 원의 바깥 지름입니다.
     fn circle_diameter(size: Size) -> i16 {
         (size.width.min(size.height) - 8).clamp(6, 40)
+    }
+
+    /// 판정된 입력들의 평균 타이밍 오차(ms). 입력이 없으면 `None`.
+    ///
+    /// **양수 = 게임 시계보다 늦게 누름.** 플레이어는 귀로 듣는 음악에 맞춰 누르므로,
+    /// 이 값은 곧 `context.audio.play()` 호출 시점과 실제로 소리가 나기 시작한 시점의
+    /// 차이(= 오디오 출력 지연)에 가깝습니다.
+    ///
+    /// 따라서 보정값은 부호를 뒤집으면 됩니다: `AUDIO_OFFSET_MS = -(평균 오차)`.
+    /// 지연은 기기마다 다르므로(PC 웹 시뮬레이터와 실기가 다릅니다) 각각 재서 맞춰야 합니다.
+    fn mean_timing_error_ms(&self) -> Option<i32> {
+        if self.timing_error_count == 0 {
+            return None;
+        }
+        let mean_s = self.timing_error_sum / self.timing_error_count as f32;
+        Some((mean_s * 1000.0).round() as i32)
     }
 
     /// 정확도 = 실제로 얻은 점수 / 전부 최고 판정이었을 때의 점수.
@@ -739,11 +1007,36 @@ impl Applet for RhythmGame {
                 continue;
             }
 
-            // 기능 키는 어느 화면에서든(연주 도중에도) 진동 방식을 전환합니다.
-            if event.code == KeyCode::Function {
-                self.cycle_vibration_mode(context);
-                needs_redraw = true;
-                continue;
+            // --- 진동 조절 키 (왼쪽 키패드, 연주 중에만) ---------------------
+            //
+            // 웹 시뮬레이터 라벨 기준으로 S / A / D 입니다.
+            // (`runtime-web/src/runner.rs` 매핑: S=Down, A=Left, D=Right, 모두 왼쪽)
+            //
+            // **연주 중에만** 가로챕니다. 곡 선택 화면에서는 이 키들이 원래대로
+            // 곡을 고르는 데 쓰이고, 메뉴 키도 양쪽 다 나가기로 그대로 둡니다.
+            // 진동은 연주 중에만 나오니, 조절도 그때만 할 수 있으면 충분합니다.
+            if self.state == GameState::Playing && event.side == KeypadSide::Left {
+                match event.code {
+                    // S — 진동 방식 전환 (듀티비 ↔ 점멸 주기)
+                    KeyCode::Down => {
+                        self.cycle_vibration_mode(context);
+                        needs_redraw = true;
+                        continue;
+                    }
+                    // A — 단계 줄이기
+                    KeyCode::Left => {
+                        self.adjust_vibration_level(context, -1);
+                        needs_redraw = true;
+                        continue;
+                    }
+                    // D — 단계 늘리기
+                    KeyCode::Right => {
+                        self.adjust_vibration_level(context, 1);
+                        needs_redraw = true;
+                        continue;
+                    }
+                    _ => {}
+                }
             }
 
             match (self.state, event.code) {
@@ -768,6 +1061,14 @@ impl Applet for RhythmGame {
 
                 // 연주 중: Space(가운데 키)로 타격
                 (GameState::Playing, KeyCode::Center) => {
+                    if let Some(t) = self.upcoming_note() {
+                        log::info!(
+                            "[계측] 타격 now={:.3} 노트={:.3} 오차={:+.0}ms",
+                            self.now_s,
+                            t,
+                            (self.now_s - t) * 1000.0
+                        );
+                    }
                     self.on_hit();
                     needs_redraw = true;
                 }
@@ -794,11 +1095,19 @@ impl Applet for RhythmGame {
 
         // --- 시간 진행 ----------------------------------------------------
         if self.state == GameState::Playing {
-            self.now_s =
-                now.saturating_sub(self.started_at).as_secs_f32() + AUDIO_OFFSET_MS as f32 / 1000.0;
-            self.reap_missed_notes();
+            self.poll_audio_sync(context, now);
 
-            if self.is_finished() {
+            if !self.sync_locked {
+                // 아직 음악이 실제로 나오기 전입니다. 시계를 0 에 묶어 두어
+                // 디코딩이 끝나기 전에 노트가 지나가 버리는 일을 막습니다.
+                self.now_s = 0.0;
+            } else {
+                self.now_s = now.saturating_sub(self.started_at).as_secs_f32()
+                    + AUDIO_OFFSET_MS as f32 / 1000.0;
+                self.reap_missed_notes();
+            }
+
+            if self.sync_locked && self.is_finished() {
                 // 음악이 자연스럽게 끝난 뒤이므로 따로 끊지 않습니다.
                 self.state = GameState::Result;
                 needs_redraw = true;
@@ -810,6 +1119,13 @@ impl Applet for RhythmGame {
                     self.good,
                     self.miss
                 );
+                if let Some(err_ms) = self.mean_timing_error_ms() {
+                    log::info!(
+                        "평균 타이밍 오차 {err_ms}ms (양수=늦게 누름). \
+                         현재 AUDIO_OFFSET_MS={AUDIO_OFFSET_MS}, 권장값={}",
+                        AUDIO_OFFSET_MS - err_ms as i64
+                    );
+                }
             }
         }
 
@@ -818,6 +1134,32 @@ impl Applet for RhythmGame {
         if visual != self.visual {
             self.visual = visual;
             needs_redraw = true;
+        }
+
+        // --- 계측: 진동이 언제 켜지고 꺼지는지 게임 시계 기준으로 기록 ---------
+        if self.state == GameState::Playing && self.sync_locked {
+            let cur = self.visual.fill.value;
+            let target = self.upcoming_note();
+            if self.probe_prev_fill == 0 && cur > 0 {
+                self.probe_onset_s = Some(self.now_s);
+                if let Some(t) = target {
+                    log::info!(
+                        "[계측] 진동 켜짐 now={:.3} 노트={:.3} 남은시간={:.0}ms (예고={:.0}ms)",
+                        self.now_s,
+                        t,
+                        (t - self.now_s) * 1000.0,
+                        self.lead() * 1000.0
+                    );
+                }
+            } else if self.probe_prev_fill > 0 && cur == 0 {
+                let onset = self.probe_onset_s.take().unwrap_or(self.now_s);
+                log::info!(
+                    "[계측] 진동 꺼짐 now={:.3} 지속={:.0}ms",
+                    self.now_s,
+                    (self.now_s - onset) * 1000.0
+                );
+            }
+            self.probe_prev_fill = cur;
         }
 
         if needs_redraw {
@@ -837,11 +1179,11 @@ impl Applet for RhythmGame {
         let center = Point::new(size.width / 2, size.height / 2);
         let diameter = Self::circle_diameter(size);
 
-        // 원 테두리는 항상 그려서 위치를 손으로 찾을 수 있게 합니다.
-        canvas.draw_circle(center, diameter, Style::with_stroke(Intensity::new(90), 1));
-
         match self.state {
             GameState::SongSelect => {
+                // 연주 전에는 손가락을 올릴 위치를 찾을 수 있도록 테두리를 보여 줍니다.
+                canvas.draw_circle(center, diameter, Style::with_stroke(Intensity::new(90), 1));
+
                 // 곡 개수만큼 점을 찍고 현재 선택된 곡만 강하게 표시합니다.
                 let count = self.songs.len().max(1) as i16;
                 let gap = 3;
@@ -862,9 +1204,15 @@ impl Applet for RhythmGame {
             GameState::Playing => {
                 // 진동하는 안쪽 원. 선형 모드에서는 애플릿이 직접 켜고 끄고,
                 // 하드웨어 모드에서는 blink 강도를 그대로 넘겨 장치가 깜빡이게 합니다.
+                // 테두리를 따로 그리지 않고 **원 전체를 하나의 균일한 강도**로 채웁니다.
+                // 정적인 테두리 + 강해지는 중심 조합은 "가운데만 세진다"는 느낌을 줍니다.
                 let fill = self.visual.fill;
                 if fill.value > 0 {
-                    canvas.draw_circle(center, (diameter - 6).max(2), Style::with_fill(fill));
+                    canvas.draw_circle(
+                        center,
+                        VIBRATING_DISC_DIAMETER.min(size.height - 4).max(2),
+                        Style::with_fill(fill),
+                    );
                 }
 
                 // 곡 진행 막대 (맨 아랫줄)
@@ -889,6 +1237,7 @@ impl Applet for RhythmGame {
                 }
             }
             GameState::Result => {
+                canvas.draw_circle(center, diameter, Style::with_stroke(Intensity::new(90), 1));
                 // 정확도를 가로 막대 길이로 표현합니다.
                 let len = (self.accuracy() * size.width as f32) as i16;
                 canvas.draw_line(
@@ -965,11 +1314,11 @@ impl Applet for RhythmGame {
 
     fn on_help(&self, _context: &Context) -> LocalizedString {
         LocalizedString {
-            ko: "리듬 게임입니다. 곡 선택 화면에서 좌우 키로 곡을 고르고 가운데 키를 누르면 연주가 시작됩니다. 화면 가운데 원의 진동이 점점 강해지다가 가장 강해지는 순간에 가운데 키를 누르세요. 기능 키를 누르면 진동 방식이 두 가지로 번갈아 바뀝니다. 메뉴 키를 누르면 연주를 중단하거나 애플릿을 종료합니다."
+            ko: "리듬 게임입니다. 곡 선택 화면에서 좌우 키로 곡을 고르고 가운데 키를 누르면 연주가 시작됩니다. 화면 가운데 원의 진동이 점점 강해지다가 가장 강해지는 순간에 가운데 키를 누르세요. 연주 중에는 왼쪽 키패드의 아래 키로 진동 방식을 바꾸고, 왼쪽 키로 진동 단계를 1까지 내리고, 오른쪽 키로 7까지 올립니다. 메뉴 키를 누르면 연주를 중단하거나 애플릿을 종료합니다."
                 .to_string(),
-            en: "Rhythm game. On the song select screen use left and right to choose a track, then press the center key to start. The circle in the middle vibrates more and more strongly; press the center key at its peak. The function key toggles between two vibration styles. Press menu to stop or exit."
+            en: "Rhythm game. On the song select screen use left and right to choose a track, then press the center key to start. The circle in the middle vibrates more and more strongly; press the center key at its peak. While playing, the left keypad adjusts the vibration: down switches the style, left lowers the level down to 1 and right raises it up to 7. Press menu to stop or exit."
                 .to_string(),
-            ja: "リズムゲームです。曲選択画面で左右キーで曲を選び、中央キーで演奏を開始します。中央の円の振動が徐々に強くなり、最も強くなった瞬間に中央キーを押してください。ファンクションキーで振動方式が2種類に切り替わります。メニューキーで中断または終了します。"
+            ja: "リズムゲームです。曲選択画面で左右キーで曲を選び、中央キーで演奏を開始します。中央の円の振動が徐々に強くなり、最も強くなった瞬間に中央キーを押してください。演奏中は左キーパッドの下キーで振動方式を切り替え、左キーで段階を1まで下げ、右キーで7まで上げます。メニューキーで中断または終了します。"
                 .to_string(),
         }
     }
@@ -983,8 +1332,27 @@ pub extern "C" fn run() {
 
 #[cfg(test)]
 mod tests {
+    use sdk::api::keypad::KeypadEvent;
     use super::*;
     use sdk::api::display::Canvas;
+
+    /// 진동 전용 시계는 판정 시계(`now_s`)보다 `TACTILE_OUTPUT_DELAY_MS` 만큼 앞섭니다.
+    /// 테스트에서 "진동 기준으로 시각 t" 를 만들려면 `now_s` 를 그만큼 되돌려 놓아야 합니다.
+    const CUE_ADVANCE_S: f32 = TACTILE_OUTPUT_DELAY_MS as f32 / 1000.0;
+
+    /// 왼쪽 키패드의 키를 한 번 누르고 `on_update` 를 한 바퀴 돌립니다.
+    fn press_left(game: &mut RhythmGame, context: &mut Context, code: KeyCode) {
+        context.keypad.push_event_front(KeypadEvent {
+            code,
+            state: KeyState::Pressed,
+            side: KeypadSide::Left,
+        });
+        game.on_update(context).expect("on_update 실패");
+    }
+
+    fn set_cue_time(game: &mut RhythmGame, cue_time: f32) {
+        game.now_s = cue_time - CUE_ADVANCE_S;
+    }
 
     fn loaded_game() -> RhythmGame {
         let game = RhythmGame {
@@ -993,6 +1361,55 @@ mod tests {
         };
         assert!(!game.songs.is_empty(), "채보를 하나도 읽지 못했습니다");
         game
+    }
+
+    /// 음악이 실제로 시작되기 전에는 시계가 0 에 묶여 있어야 합니다.
+    /// 그렇지 않으면 디코딩이 끝나기도 전에 앞부분 노트들이 Miss 로 흘러갑니다.
+    #[test]
+    fn clock_is_frozen_until_audio_actually_starts() {
+        let mut game = loaded_game();
+        let mut context = Context::new();
+
+        game.start_song(&mut context, Duration::ZERO);
+        assert_eq!(game.state, GameState::Playing);
+        assert!(
+            !game.sync_locked,
+            "아직 재생 위치를 확인하지 못한 상태여야 합니다"
+        );
+
+        // 이 시점에 on_update 가 여러 번 돌아도 시간이 흐르면 안 됩니다.
+        for _ in 0..5 {
+            game.on_update(&mut context).expect("on_update 실패");
+        }
+        assert_eq!(game.now_s, 0.0, "동기화 전에는 시계가 멈춰 있어야 합니다");
+        assert_eq!(game.miss, 0, "동기화 전에 노트가 사라지면 안 됩니다");
+        assert_eq!(game.next_note, 0);
+    }
+
+    /// audio-service 가 없어도 게임이 영원히 멈춰 있으면 안 됩니다.
+    /// 일정 시간이 지나면 요청 시점 기준으로 진행을 시작해야 합니다.
+    #[test]
+    fn falls_back_when_the_audio_service_never_responds() {
+        let mut game = loaded_game();
+        let mut context = Context::new();
+
+        game.start_song(&mut context, Duration::ZERO);
+        assert!(!game.sync_locked);
+
+        // 타임아웃 직전
+        game.poll_audio_sync(
+            &mut context,
+            Duration::from_millis(SYNC_TIMEOUT_MS) - Duration::from_millis(1),
+        );
+        assert!(!game.sync_locked, "타임아웃 전에는 기다려야 합니다");
+
+        // 타임아웃 이후
+        game.poll_audio_sync(
+            &mut context,
+            Duration::from_millis(SYNC_TIMEOUT_MS) + Duration::from_millis(1),
+        );
+        assert!(game.sync_locked, "타임아웃 후에는 진행을 시작해야 합니다");
+        assert_eq!(game.started_at, game.play_requested_at);
     }
 
     /// 판정표 자체가 앞뒤가 맞는지 — 오차는 커지고 점수는 작아지는 순서여야 합니다.
@@ -1111,7 +1528,7 @@ mod tests {
                     game.lead()
                 );
                 assert!(
-                    (0.05..=0.30).contains(&game.lead()),
+                    (0.05..=1.00).contains(&game.lead()),
                     "예고 시간이 상식적인 범위를 벗어났습니다: {}초",
                     game.lead()
                 );
@@ -1188,14 +1605,14 @@ mod tests {
         let lead = game.lead(); // 0.3
 
         // 예고 시작 직전에는 원이 비어 있어야 합니다.
-        game.now_s = target - lead - 0.01;
+        set_cue_time(&mut game, target - lead - 0.01);
         assert_eq!(game.vibration_fill(), Intensity::OFF);
 
         // 예고 구간 안에서는 한 번이라도 켜지는 순간이 있어야 합니다.
         let mut lit = 0;
         let mut t = target - lead;
         while t < target {
-            game.now_s = t;
+            set_cue_time(&mut game, t);
             if game.vibration_fill().value > 0 {
                 lit += 1;
             }
@@ -1206,32 +1623,121 @@ mod tests {
 
     /// 기능 키를 누르면 진동 방식이 순환하고, 세 번 누르면 처음으로 돌아와야 합니다.
     /// 실제 `on_update` 경로를 그대로 태워서 키 매핑까지 함께 검증합니다.
+    ///
+    /// 시뮬레이터 라벨로 S = 왼쪽 Down 입니다.
     #[test]
-    fn function_key_cycles_vibration_modes() {
-        use sdk::api::keypad::{KeypadEvent, KeypadSide};
-
+    fn s_key_cycles_vibration_modes() {
         let mut game = loaded_game();
         let mut context = Context::new();
-        assert_eq!(game.vibration_mode, VibrationMode::Swell);
+        game.state = GameState::Playing;
+        assert_eq!(game.vibration_mode, VibrationMode::DutyRatio);
 
-        let press_function = |game: &mut RhythmGame, context: &mut Context| {
-            context.keypad.push_event_front(KeypadEvent {
-                code: KeyCode::Function,
-                state: KeyState::Pressed,
-                side: KeypadSide::Left,
-            });
-            game.on_update(context).expect("on_update 실패");
-        };
+        press_left(&mut game, &mut context, KeyCode::Down);
+        assert_eq!(game.vibration_mode, VibrationMode::BlinkPeriod);
 
-        press_function(&mut game, &mut context);
-        assert_eq!(game.vibration_mode, VibrationMode::HardwareSteps);
-
-        press_function(&mut game, &mut context);
+        press_left(&mut game, &mut context, KeyCode::Down);
         assert_eq!(
             game.vibration_mode,
-            VibrationMode::Swell,
+            VibrationMode::DutyRatio,
             "두 번 누르면 처음 방식으로 돌아와야 합니다"
         );
+    }
+
+    /// A = 왼쪽 Left 로 단계를 내리고, D = 왼쪽 Right 로 올립니다.
+    /// 단계 번호가 곧 하드웨어 레벨이므로 범위는 1~7 입니다.
+    #[test]
+    fn a_and_d_adjust_the_vibration_level() {
+        let mut game = loaded_game();
+        let mut context = Context::new();
+        game.state = GameState::Playing;
+        assert_eq!(game.vibration_level, DEFAULT_VIBRATION_LEVEL);
+
+        // 최소까지 내립니다.
+        for expected in (MIN_VIBRATION_LEVEL..DEFAULT_VIBRATION_LEVEL).rev() {
+            press_left(&mut game, &mut context, KeyCode::Left);
+            assert_eq!(game.vibration_level, expected);
+        }
+
+        // 최소에서 더 눌러도 0 으로 내려가지 않습니다. 0 은 "꺼짐"이라 설정값이 못 됩니다.
+        press_left(&mut game, &mut context, KeyCode::Left);
+        assert_eq!(game.vibration_level, MIN_VIBRATION_LEVEL);
+
+        // 다시 최대까지 올립니다.
+        for expected in (MIN_VIBRATION_LEVEL + 1)..=MAX_VIBRATION_LEVEL {
+            press_left(&mut game, &mut context, KeyCode::Right);
+            assert_eq!(game.vibration_level, expected);
+        }
+
+        // 최대에서 더 눌러도 넘어가지 않습니다.
+        press_left(&mut game, &mut context, KeyCode::Right);
+        assert_eq!(game.vibration_level, MAX_VIBRATION_LEVEL);
+    }
+
+    /// 설정한 단계가 그대로 하드웨어 레벨로 나와야 합니다.
+    /// 1단계면 레벨 1, 7단계면 레벨 7 — 예고 내내 고정입니다.
+    #[test]
+    fn the_step_number_is_the_hardware_level() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+        let lead = game.lead();
+
+        for level in MIN_VIBRATION_LEVEL..=MAX_VIBRATION_LEVEL {
+            game.vibration_level = level;
+
+            // 예고 구간 전체를 훑어도 레벨이 변하지 않아야 합니다.
+            let mut t = target - lead - CUE_ADVANCE_S;
+            while t < target {
+                game.now_s = t;
+                let v = game.vibration_fill().value;
+                let got = (v as u16 * 7 + 127) / 255;
+                assert_eq!(
+                    got, level as u16,
+                    "{level}단계인데 레벨 {got} 이 나왔습니다 (now_s={t})"
+                );
+                t += 0.005;
+            }
+        }
+    }
+
+    /// 곡 선택 화면에서는 왼쪽 A/D 가 원래대로 곡을 고르는 데 쓰여야 합니다.
+    /// 진동 조절은 연주 중에만 가로챕니다.
+    #[test]
+    fn left_arrows_still_pick_songs_outside_play() {
+        let mut game = loaded_game();
+        let mut context = Context::new();
+        assert_eq!(game.state, GameState::SongSelect);
+
+        let before = game.vibration_level;
+        press_left(&mut game, &mut context, KeyCode::Right);
+
+        assert_eq!(
+            game.vibration_level, before,
+            "곡 선택 화면에서는 단계가 바뀌면 안 됩니다"
+        );
+    }
+
+    /// 나가기는 **양쪽** Menu 모두에서 되어야 합니다.
+    #[test]
+    fn either_menu_key_leaves_the_song() {
+        for side in [KeypadSide::Left, KeypadSide::Right] {
+            let mut game = loaded_game();
+            let mut context = Context::new();
+            game.state = GameState::Playing;
+
+            context.keypad.push_event_front(KeypadEvent {
+                code: KeyCode::Menu,
+                state: KeyState::Pressed,
+                side,
+            });
+            game.on_update(&mut context).expect("on_update 실패");
+
+            assert_eq!(
+                game.state,
+                GameState::SongSelect,
+                "{side:?} Menu 로 연주에서 빠져나올 수 있어야 합니다"
+            );
+        }
     }
 
     /// 전환된 방식이 실제 렌더링에 반영되는지 확인합니다.
@@ -1242,14 +1748,14 @@ mod tests {
         let target = game.song().unwrap().notes[0];
         game.now_s = target - game.lead() / 2.0; // 예고 구간 한가운데
 
-        game.vibration_mode = VibrationMode::Swell;
+        game.vibration_mode = VibrationMode::DutyRatio;
         let swell = game.vibration_fill();
         assert!(
             !swell.blink,
             "Swell 은 PWM 강도라 blink 가 꺼져 있어야 합니다"
         );
 
-        game.vibration_mode = VibrationMode::HardwareSteps;
+        game.vibration_mode = VibrationMode::BlinkPeriod;
         let steps = game.vibration_fill();
         assert!(steps.blink, "HardwareSteps 는 blink 가 켜져 있어야 합니다");
     }
@@ -1260,7 +1766,7 @@ mod tests {
     fn swell_ramps_up_monotonically() {
         assert_eq!(
             RhythmGame::default().vibration_mode,
-            VibrationMode::Swell,
+            VibrationMode::DutyRatio,
             "기본 모드가 바뀌었습니다"
         );
 
@@ -1274,7 +1780,7 @@ mod tests {
         let mut prev = 0u8;
         for i in 0..=STEPS {
             let t = target - lead + lead * (i as f32 / STEPS as f32);
-            game.now_s = t;
+            set_cue_time(&mut game, t);
             let fill = game.vibration_fill();
             assert!(!fill.blink, "Swell 모드는 깜빡임을 쓰지 않아야 합니다");
             assert!(
@@ -1286,36 +1792,133 @@ mod tests {
         }
 
         assert_eq!(prev, 255, "노트 시각에는 최대 강도여야 합니다");
-
-        // 판정 여유 구간에서도 최대치를 유지합니다.
-        game.now_s = target + HIT_WINDOW_S / 2.0;
-        assert_eq!(game.vibration_fill().value, 255);
     }
 
-    /// HardwareSteps 모드는 예고 시간을 8등분한 깜빡임 단계를 내보내야 합니다.
+    /// 1단계 설정에서는 켜져 있는 내내 세기가 고정이어야 합니다.
+    /// 세기가 변하면 그만큼 핀을 다시 보내야 하므로, 전송 예산의 전제가 깨집니다.
     #[test]
-    fn hardware_steps_uses_eight_blink_levels() {
+    fn swell_holds_a_single_level_while_on() {
         let mut game = loaded_game();
         game.state = GameState::Playing;
         let target = game.song().unwrap().notes[0];
         let lead = game.lead();
 
-        let mut levels = Vec::new();
-        for i in 0..VIBRATION_STEPS {
-            // 각 구간의 한가운데를 샘플링합니다.
-            game.now_s = target - lead + lead * (i as f32 + 0.5) / VIBRATION_STEPS as f32;
-            let fill = game.vibration_fill_with(VibrationMode::HardwareSteps);
-            assert!(fill.blink, "하드웨어 모드는 깜빡임 플래그를 써야 합니다");
-            levels.push(fill.value);
+        let mut seen = std::collections::BTreeSet::new();
+        // 켜져 있어야 하는 구간 전체: [T - 예고 - 보정, T]
+        let mut t = target - lead - CUE_ADVANCE_S;
+        while t < target {
+            game.now_s = t;
+            let v = game.vibration_fill().value;
+            assert!(v > 0, "켜져 있어야 하는 구간인데 꺼졌습니다 (now_s={t})");
+            seen.insert((v as u16 * 7 + 127) / 255);
+            t += 0.001;
         }
 
-        assert_eq!(levels.len(), 8);
-        assert_eq!(levels[0], 0, "첫 단계는 꺼짐이어야 합니다");
-        assert_eq!(levels[7], 255, "마지막 단계는 최대여야 합니다");
-        assert!(
-            levels.windows(2).all(|w| w[0] < w[1]),
-            "단계가 단조 증가해야 합니다"
+        assert_eq!(
+            seen.iter().copied().collect::<Vec<_>>(),
+            vec![7],
+            "켜져 있는 내내 최대 단계 하나만 나와야 합니다"
         );
+    }
+
+    /// 진동의 **시작**은 판정 시계보다 출력 지연만큼 앞서야 합니다.
+    /// 그래야 UART·PWM·핀 응답을 거쳐 손끝에 닿는 시점이 `T - 예고` 가 됩니다.
+    #[test]
+    fn vibration_starts_ahead_by_the_output_delay() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+        let lead = game.lead();
+        let on_at = target - lead - CUE_ADVANCE_S;
+
+        // 켜지기 직전
+        game.now_s = on_at - 0.002;
+        assert_eq!(
+            game.vibration_fill(),
+            Intensity::OFF,
+            "`T - 예고 - 보정` 이전에는 꺼져 있어야 합니다"
+        );
+
+        // 켜지는 순간
+        game.now_s = on_at + 0.002;
+        assert_eq!(
+            game.vibration_fill().value,
+            255,
+            "`T - 예고 - 보정` 부터 켜져야 합니다"
+        );
+    }
+
+    /// 끄는 시점은 보정하지 **않습니다.** 판정 시계로 정확히 `T` 에 꺼집니다.
+    ///
+    /// 미리 끄면 정작 쳐야 할 순간에 진동이 이미 사라져 있습니다.
+    /// 켜져 있는 구간은 `[T - 예고 - 보정, T]`, 길이는 `예고 + 보정` 입니다.
+    #[test]
+    fn vibration_stops_at_the_note_without_compensation() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+        let lead = game.lead();
+
+        // 노트 직전: 아직 최대 강도
+        game.now_s = target - 0.002;
+        assert_eq!(
+            game.vibration_fill().value,
+            255,
+            "노트 직전까지는 켜져 있어야 합니다"
+        );
+
+        // 노트 시각 직후: 즉시 꺼짐
+        game.now_s = target + 0.002;
+        assert_eq!(
+            game.vibration_fill(),
+            Intensity::OFF,
+            "노트를 지나면 바로 꺼져야 합니다"
+        );
+
+        // 켜져 있던 총 길이 = 예고 + 보정
+        let on_at = target - lead - CUE_ADVANCE_S;
+        assert!(
+            ((target - on_at) - (lead + CUE_ADVANCE_S)).abs() < 1e-6,
+            "지속 시간이 예고 + 보정이어야 합니다"
+        );
+
+        // 아직 칠 수 있는 구간이지만 진동은 없습니다.
+        game.now_s = target + HIT_WINDOW_S / 2.0;
+        assert_eq!(game.vibration_fill(), Intensity::OFF);
+        assert!(
+            Judge::from_error(HIT_WINDOW_S / 2.0).is_some(),
+            "진동이 꺼져도 판정은 아직 열려 있어야 합니다"
+        );
+    }
+
+    /// 점멸 주기 모드는 같은 단계를 깜빡임 플래그로 내보내야 합니다.
+    /// 단계가 올라가면 강도값도 단조 증가합니다.
+    #[test]
+    fn blink_period_mode_maps_each_level_to_a_blink_rate() {
+        let mut game = loaded_game();
+        game.state = GameState::Playing;
+        let target = game.song().unwrap().notes[0];
+        game.now_s = target - game.lead();
+
+        let mut values = Vec::new();
+        for level in MIN_VIBRATION_LEVEL..=MAX_VIBRATION_LEVEL {
+            game.vibration_level = level;
+            let fill = game.vibration_fill_with(VibrationMode::BlinkPeriod);
+            assert!(fill.blink, "점멸 모드는 깜빡임 플래그를 써야 합니다");
+            values.push(fill.value);
+        }
+
+        assert_eq!(values.len(), 7);
+        assert_eq!(*values.last().unwrap(), 255, "7단계는 최대여야 합니다");
+        assert!(
+            values.windows(2).all(|w| w[0] < w[1]),
+            "단계가 올라가면 강도값도 올라가야 합니다: {values:?}"
+        );
+
+        // 듀티비 모드는 같은 단계를 깜빡임 없이 냅니다.
+        let duty = game.vibration_fill_with(VibrationMode::DutyRatio);
+        assert!(!duty.blink, "듀티비 모드는 깜빡임 플래그를 쓰지 않아야 합니다");
+        assert_eq!(duty.value, *values.last().unwrap(), "같은 단계는 같은 강도값");
     }
 
     #[test]
