@@ -179,6 +179,17 @@ fn blink_frequency_hz(level: u8) -> Option<f32> {
     }
 }
 
+/// 내부 레벨(0~7)을 **사람에게 말할 번호(1~8)** 로 바꿉니다.
+///
+/// 내부적으로는 하드웨어 레벨을 그대로 쓰는 게 맞습니다 — 4비트 코드와 1:1 이고
+/// 펌웨어·런타임 쪽 계산이 전부 0 기준이라, 여기서 어긋나면 변환이 하나 더 끼어듭니다.
+/// 반면 사람에게는 "0단계"가 어색하므로 말할 때만 1 을 더합니다.
+///
+/// 그러니 로그와 음성은 **반드시 이 함수를 거쳐야** 합니다.
+fn spoken_level(level: u8) -> u8 {
+    level + 1
+}
+
 /// 단계(= 하드웨어 레벨 0~7)를 그 레벨이 나오는 강도값으로 바꿉니다.
 ///
 /// 런타임이 `(v*7+127)/255` 로 양자화하므로, 그 역함수에 해당합니다.
@@ -1018,10 +1029,12 @@ impl RhythmGame {
         }
         self.vibration_level = next;
 
+        // 내부 레벨은 0~7 이지만 사람에게는 1~8 로 말합니다.
+        let shown = spoken_level(next);
         let label = match context.language {
-            Language::Ko => format!("{next}단계"),
-            Language::Ja => format!("{next}段階"),
-            _ => format!("level {next}"),
+            Language::Ko => format!("{shown}단계"),
+            Language::Ja => format!("{shown}段階"),
+            _ => format!("level {shown}"),
         };
         context
             .audio
@@ -1034,7 +1047,7 @@ impl RhythmGame {
                 // 창이 경계를 하나도 안 넘을 확률 = 통째로 켜지거나 꺼질 확률
                 let solid = ((half_ms - lead_ms) / half_ms).max(0.0) * 100.0;
                 log::info!(
-                    "진동 단계 {next} — 점멸 {hz}Hz(반주기 {half_ms:.0}ms),                      예고 {lead_ms:.0}ms 에 평균 전환 {:.1}회{}",
+                    "진동 단계 {shown} — 점멸 {hz}Hz(반주기 {half_ms:.0}ms), 예고 {lead_ms:.0}ms 에 평균 전환 {:.1}회{}",
                     lead_ms / half_ms,
                     if solid > 0.0 {
                         format!(" ← 노트의 약 {solid:.0}% 는 깜빡임 없이 통째로 켜지거나 꺼집니다")
@@ -1044,10 +1057,11 @@ impl RhythmGame {
                 );
             }
             (VibrationMode::BlinkPeriod, None) => {
-                log::info!("진동 단계 {next} — 점멸 모드지만 정적입니다 (0=꺼짐, 7=항상 켜짐)")
+                log::info!("진동 단계 {shown} — 점멸 모드지만 정적입니다 (1단계=꺼짐, 8단계=항상 켜짐)")
             }
             (VibrationMode::DutyRatio, _) => log::info!(
-                "진동 단계 {next}/{MAX_VIBRATION_LEVEL} — 듀티비, 강도값 {}",
+                "진동 단계 {shown}/{} — 듀티비, 강도값 {}",
+                spoken_level(MAX_VIBRATION_LEVEL),
                 level_to_value(next)
             ),
         }
@@ -1318,7 +1332,7 @@ impl Applet for RhythmGame {
                 // 연주 중 예고는 길어야 1.1초라 느린 주기는 한 주기도 담기지 않습니다.
                 // 여기서는 계속 켜 두므로 S / A·D 로 방식과 단계를 천천히 비교할 수 있습니다.
                 // 손가락 올릴 위치를 찾는 역할도 겸합니다.
-                // 0단계는 값이 0 이라 아무것도 그리지 않습니다.
+                // 레벨 0 은 값이 0 이라 아무것도 그리지 않습니다.
                 // 대신 테두리 같은 걸 올리면 "진동 0인데 뭔가 뜬다"가 되어 헷갈립니다.
                 let intensity = self.vibration_preview();
                 if intensity.value > 0 {
@@ -1453,11 +1467,11 @@ impl Applet for RhythmGame {
 
     fn on_help(&self, _context: &Context) -> LocalizedString {
         LocalizedString {
-            ko: "리듬 게임입니다. 곡 선택 화면에서 좌우 키로 곡을 고르고 가운데 키를 누르면 연주가 시작됩니다. 화면 가운데 원의 진동이 점점 강해지다가 가장 강해지는 순간에 가운데 키를 누르세요. 왼쪽 키패드로 진동을 조절합니다. 아래 키로 방식을 바꾸고, 왼쪽 키와 오른쪽 키로 단계를 0부터 7까지 조절합니다. 두 방식 모두 같은 범위입니다. 곡 선택 화면에서는 원이 그 설정대로 계속 진동하므로 천천히 비교해 볼 수 있습니다. 곡은 오른쪽 방향키로 고릅니다. 메뉴 키를 누르면 연주를 중단하거나 애플릿을 종료합니다."
+            ko: "리듬 게임입니다. 곡 선택 화면에서 좌우 키로 곡을 고르고 가운데 키를 누르면 연주가 시작됩니다. 화면 가운데 원의 진동이 점점 강해지다가 가장 강해지는 순간에 가운데 키를 누르세요. 왼쪽 키패드로 진동을 조절합니다. 아래 키로 방식을 바꾸고, 왼쪽 키와 오른쪽 키로 단계를 1부터 8까지 조절합니다. 두 방식 모두 같은 범위입니다. 곡 선택 화면에서는 원이 그 설정대로 계속 진동하므로 천천히 비교해 볼 수 있습니다. 곡은 오른쪽 방향키로 고릅니다. 메뉴 키를 누르면 연주를 중단하거나 애플릿을 종료합니다."
                 .to_string(),
-            en: "Rhythm game. On the song select screen use left and right to choose a track, then press the center key to start. The circle in the middle vibrates more and more strongly; press the center key at its peak. The left keypad adjusts the vibration: down switches the style, left and right adjust the level from 0 to 7. Both styles use the same range. On the song select screen the circle keeps vibrating with that setting so you can compare at your own pace. Pick songs with the right arrow keys. Press menu to stop or exit."
+            en: "Rhythm game. On the song select screen use left and right to choose a track, then press the center key to start. The circle in the middle vibrates more and more strongly; press the center key at its peak. The left keypad adjusts the vibration: down switches the style, left and right adjust the level from 1 to 8. Both styles use the same range. On the song select screen the circle keeps vibrating with that setting so you can compare at your own pace. Pick songs with the right arrow keys. Press menu to stop or exit."
                 .to_string(),
-            ja: "リズムゲームです。曲選択画面で左右キーで曲を選び、中央キーで演奏を開始します。中央の円の振動が徐々に強くなり、最も強くなった瞬間に中央キーを押してください。左キーパッドで振動を調整します。下キーで方式、左キーと右キーで段階を0から7まで調整します。どちらの方式も同じ範囲です。曲選択画面では円がその設定で振動し続けるのでゆっくり比較できます。曲は右の方向キーで選びます。メニューキーで中断または終了します。"
+            ja: "リズムゲームです。曲選択画面で左右キーで曲を選び、中央キーで演奏を開始します。中央の円の振動が徐々に強くなり、最も強くなった瞬間に中央キーを押してください。左キーパッドで振動を調整します。下キーで方式、左キーと右キーで段階を1から8まで調整します。どちらの方式も同じ範囲です。曲選択画面では円がその設定で振動し続けるのでゆっくり比較できます。曲は右の方向キーで選びます。メニューキーで中断または終了します。"
                 .to_string(),
         }
     }
@@ -1832,7 +1846,7 @@ mod tests {
                 let got = (v as u16 * 7 + 127) / 255;
                 assert_eq!(
                     got, level as u16,
-                    "{level}단계인데 레벨 {got} 이 나왔습니다 (now_s={t})"
+                    "레벨 {level} 인데 레벨 {got} 이 나왔습니다 (now_s={t})"
                 );
                 t += 0.005;
             }
@@ -2232,15 +2246,35 @@ mod tests {
             );
         }
 
-        // 7단계만 어긋납니다. 펌웨어가 코드 7 을 항상 켜짐으로 특수 처리하기 때문입니다.
+        // 레벨 7 만 어긋납니다. 펌웨어가 코드 7 을 항상 켜짐으로 특수 처리하기 때문입니다.
         assert_eq!(
             duties[7] - duties[6],
             25.0,
-            "7단계는 펌웨어 특수 처리로 75% → 100% 로 건너뜁니다"
+            "레벨 7 은 펌웨어 특수 처리로 75% → 100% 로 건너뜁니다"
         );
     }
 
-    /// 0단계는 **어느 화면에서도** 핀이 하나도 안 떠야 합니다.
+    /// 사람에게 말하는 번호는 1~8, 내부 레벨은 0~7 이어야 합니다.
+    ///
+    /// 내부는 하드웨어 4비트 코드와 1:1 로 맞춰 두고(펌웨어·런타임이 전부 0 기준),
+    /// 표시할 때만 1 을 더합니다. 둘이 섞이면 조용히 한 단계씩 어긋납니다.
+    #[test]
+    fn levels_are_spoken_as_one_through_eight() {
+        assert_eq!(spoken_level(MIN_VIBRATION_LEVEL), 1, "최저 단계는 1단계로 말해야 합니다");
+        assert_eq!(spoken_level(MAX_VIBRATION_LEVEL), 8, "최고 단계는 8단계로 말해야 합니다");
+
+        // 내부 범위는 0~7 그대로입니다.
+        assert_eq!(MIN_VIBRATION_LEVEL, 0);
+        assert_eq!(MAX_VIBRATION_LEVEL, 7);
+
+        // 여덟 단계가 빠짐없이 1~8 로 이어져야 합니다.
+        let spoken: Vec<u8> = (MIN_VIBRATION_LEVEL..=MAX_VIBRATION_LEVEL)
+            .map(spoken_level)
+            .collect();
+        assert_eq!(spoken, (1..=8).collect::<Vec<_>>());
+    }
+
+    /// 레벨 0(= 1단계)은 **어느 화면에서도** 핀이 하나도 안 떠야 합니다.
     /// (곡 표시용 점과 진행 막대는 진동이 아니므로 제외)
     #[test]
     fn level_zero_lights_no_pins() {
@@ -2259,7 +2293,7 @@ mod tests {
                     assert_eq!(
                         canvas.get_pin(Point::new(x, y)).value,
                         0,
-                        "{mode:?} 0단계인데 곡 선택 화면 ({x},{y}) 에 핀이 떴습니다"
+                        "{mode:?} 레벨 0 인데 곡 선택 화면 ({x},{y}) 에 핀이 떴습니다"
                     );
                 }
             }
@@ -2274,7 +2308,7 @@ mod tests {
             game.visual = game.compute_visual(size.width);
             assert_eq!(
                 game.visual.fill.value, 0,
-                "{mode:?} 0단계인데 진동 세기가 0 이 아닙니다"
+                "{mode:?} 레벨 0 인데 진동 세기가 0 이 아닙니다"
             );
 
             let mut canvas = Canvas::new(size);
@@ -2284,7 +2318,7 @@ mod tests {
                     assert_eq!(
                         canvas.get_pin(Point::new(x, y)).value,
                         0,
-                        "{mode:?} 0단계인데 연주 화면 ({x},{y}) 에 핀이 떴습니다"
+                        "{mode:?} 레벨 0 인데 연주 화면 ({x},{y}) 에 핀이 떴습니다"
                     );
                 }
             }
@@ -2305,7 +2339,7 @@ mod tests {
         let on_at = target - lead - CUE_ADVANCE_S;
 
         for mode in [VibrationMode::DutyRatio, VibrationMode::BlinkPeriod] {
-            // 0단계는 꺼짐이라 켜고 꺼짐을 볼 수 없습니다.
+            // 레벨 0 은 꺼짐이라 켜고 꺼짐을 볼 수 없습니다.
             for level in 1..=MAX_VIBRATION_LEVEL {
                 game.vibration_mode = mode;
                 game.vibration_level = level;
@@ -2314,20 +2348,20 @@ mod tests {
                 assert_eq!(
                     game.vibration_fill_with(mode),
                     Intensity::OFF,
-                    "{mode:?} {level}단계: 예고 시작 전에는 꺼져 있어야 합니다"
+                    "{mode:?} 레벨 {level}: 예고 시작 전에는 꺼져 있어야 합니다"
                 );
 
                 game.now_s = on_at + 0.002;
                 assert!(
                     game.vibration_fill_with(mode).value > 0,
-                    "{mode:?} {level}단계: 예고가 시작되면 켜져야 합니다"
+                    "{mode:?} 레벨 {level}: 예고가 시작되면 켜져야 합니다"
                 );
 
                 game.now_s = target + 0.002;
                 assert_eq!(
                     game.vibration_fill_with(mode),
                     Intensity::OFF,
-                    "{mode:?} {level}단계: 노트를 지나면 꺼져야 합니다"
+                    "{mode:?} 레벨 {level}: 노트를 지나면 꺼져야 합니다"
                 );
             }
         }
@@ -2341,7 +2375,7 @@ mod tests {
         let target = game.song().unwrap().notes[0];
         let lead = game.lead();
 
-        // 0단계는 꺼짐이라 켜고 꺼짐을 볼 수 없습니다. 1단계부터 봅니다.
+        // 레벨 0 은 꺼짐이라 켜고 꺼짐을 볼 수 없습니다. 1단계부터 봅니다.
         for level in 1..=MAX_VIBRATION_LEVEL {
             game.vibration_level = level;
             game.now_s = target - lead - CUE_ADVANCE_S - 0.01;
@@ -2376,7 +2410,7 @@ mod tests {
         }
 
         assert_eq!(values.len(), 8, "0~7 단계 여덟 개여야 합니다");
-        assert_eq!(*values.last().unwrap(), 255, "7단계는 최대여야 합니다");
+        assert_eq!(*values.last().unwrap(), 255, "레벨 7 은 최대여야 합니다");
         assert!(
             values.windows(2).all(|w| w[0] < w[1]),
             "단계가 올라가면 강도값도 올라가야 합니다: {values:?}"
