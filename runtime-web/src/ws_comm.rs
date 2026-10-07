@@ -3,7 +3,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::{ErrorEvent, MessageEvent, WebSocket};
 
-const TX_BUF_SIZE: usize = 1024;
+/// 실험 결과(CSV)처럼 애플릿 저장값을 돌려줄 때도 들어가도록 네이티브(4096)와 맞춥니다.
+const TX_BUF_SIZE: usize = 4096;
 
 pub struct WsClosures {
     pub onmessage: Closure<dyn FnMut(MessageEvent)>,
@@ -82,6 +83,13 @@ pub fn start_websocket_comm(
                             "WebSocket: CancelWifiOperation request ignored (only supported on native)"
                         );
                         send_response(&ws_clone, CaptureResponseFromRuntime::Error);
+                    }
+                    CaptureRequestToRuntime::GetPreferenceString { key } => {
+                        let value = crate::preferences::read_string_preference(&key);
+                        send_response(
+                            &ws_clone,
+                            CaptureResponseFromRuntime::PreferenceStringResult(value),
+                        );
                     }
                 }
             } else {

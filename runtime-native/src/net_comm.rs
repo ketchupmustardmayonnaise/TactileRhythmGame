@@ -274,6 +274,12 @@ async fn handle_request(
         CaptureRequestToRuntime::DisconnectWifi { .. } => {
             (CaptureResponseFromRuntime::Error, prev_buffer)
         }
+        CaptureRequestToRuntime::GetPreferenceString { key } => (
+            CaptureResponseFromRuntime::PreferenceStringResult(
+                crate::host::preferences::read_string_preference(&key),
+            ),
+            prev_buffer,
+        ),
     }
 }
 

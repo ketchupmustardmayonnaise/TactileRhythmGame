@@ -7,6 +7,9 @@
 //! cargo run -p device-info                       # 기기 IP 출력
 //! cargo run -p device-info -- scan               # 주변 Wi-Fi 스캔
 //! cargo run -p device-info -- wifi <SSID> <PW>   # Wi-Fi 연결 후 IP 출력
+//! cargo run -p device-info -- experiment         # tactile-experiment 결과(CSV) 출력
+//! cargo run -p device-info -- experiment -o a.csv  # 결과를 파일로 저장
+//! cargo run -p device-info -- pref <KEY>         # 애플릿이 저장한 임의의 문자열 값 출력
 //! ```
 
 use std::net::Ipv4Addr;
@@ -24,6 +27,8 @@ const GADGET_VID: u16 = 0x0525;
 const GADGET_PID: u16 = 0xA4A7;
 /// capture 앱이 쓰는 기본 보율
 const BAUD_RATE: u32 = 460_800;
+/// `tactile-experiment` 애플릿이 결과 CSV 를 저장하는 키 (`applets/tactile-experiment/src/lib.rs` 와 동일)
+const EXPERIMENT_RESULT_KEY: &str = "tactile-experiment.results";
 
 #[derive(Parser)]
 #[command(
@@ -54,6 +59,19 @@ enum Command {
         ssid: String,
         password: String,
     },
+    /// `tactile-experiment` 애플릿의 마지막 측정 결과(CSV)를 가져옵니다.
+    Experiment {
+        /// 화면 대신 이 파일에 저장합니다.
+        #[arg(short, long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// 애플릿이 저장한 문자열 설정값을 가져옵니다.
+    Pref {
+        key: String,
+        /// 화면 대신 이 파일에 저장합니다.
+        #[arg(short, long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -62,7 +80,7 @@ async fn main() -> Result<()> {
     let wait = Duration::from_secs(args.timeout);
 
     let port = resolve_port(args.port)?;
-    println!("포트 {port} 로 연결하는 중...");
+    eprintln!("포트 {port} 로 연결하는 중...");
 
     let SerialComm {
         tx_sender,
@@ -92,7 +110,7 @@ async fn main() -> Result<()> {
         )
     })??;
 
-    println!("연결됨.\n");
+    eprintln!("연결됨.\n");
 
     match args.command.unwrap_or(Command::Ip) {
         Command::Ip => {
@@ -146,8 +164,58 @@ async fn main() -> Result<()> {
             let ips = fetch_addresses(&tx_sender, &mut rx_receiver, wait).await?;
             print_addresses(&ips);
         }
+        Command::Experiment { out } => {
+            let value = fetch_preference(&tx_sender, &mut rx_receiver, EXPERIMENT_RESULT_KEY, wait)
+                .await?
+                .ok_or_else(|| {
+                    anyhow!("저장된 실험 결과가 없습니다. 기기에서 tactile-experiment 를 먼저 진행하세요.")
+                })?;
+            emit(&value, out.as_deref())?;
+        }
+        Command::Pref { key, out } => {
+            let value = fetch_preference(&tx_sender, &mut rx_receiver, &key, wait)
+                .await?
+                .ok_or_else(|| anyhow!("'{key}' 키로 저장된 값이 없습니다."))?;
+            emit(&value, out.as_deref())?;
+        }
     }
 
+    Ok(())
+}
+
+async fn fetch_preference(
+    tx: &Sender<CaptureRequestToRuntime>,
+    rx: &mut Receiver<CaptureResponseFromRuntime>,
+    key: &str,
+    wait: Duration,
+) -> Result<Option<String>> {
+    let res = ask(
+        tx,
+        rx,
+        CaptureRequestToRuntime::GetPreferenceString {
+            key: key.to_string(),
+        },
+        wait,
+        |r| matches!(r, CaptureResponseFromRuntime::PreferenceStringResult(_)),
+    )
+    .await
+    .context("기기의 runtime-native 가 이 요청을 모르는 이전 버전일 수 있습니다. 런타임을 다시 배포하세요")?;
+    let CaptureResponseFromRuntime::PreferenceStringResult(value) = res else {
+        unreachable!()
+    };
+    Ok(value)
+}
+
+/// 값을 파일에 쓰거나, 경로가 없으면 표준 출력으로 내보냅니다.
+fn emit(value: &str, out: Option<&std::path::Path>) -> Result<()> {
+    match out {
+        Some(path) => {
+            std::fs::write(path, value)
+                .with_context(|| format!("{} 에 쓰지 못했습니다", path.display()))?;
+            println!("{} 에 저장했습니다.", path.display());
+        }
+        None => print!("{value}"),
+    }
     Ok(())
 }
 
@@ -168,7 +236,7 @@ fn resolve_port(explicit: Option<String>) -> Result<String> {
         ),
         1 => Ok(ports[0].clone()),
         _ => {
-            println!("여러 포트가 검색되어 첫 번째를 사용합니다: {ports:?}");
+            eprintln!("여러 포트가 검색되어 첫 번째를 사용합니다: {ports:?}");
             Ok(ports[0].clone())
         }
     }

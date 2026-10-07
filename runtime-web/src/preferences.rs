@@ -117,6 +117,11 @@ fn read_from_storage<T: PreferenceAccess>(key: &str) -> Option<String> {
     ls.get_item(&storage_key).ok().flatten()
 }
 
+/// 애플릿이 저장한 문자열 설정값을 읽습니다. PC 의 `GetPreferenceString` 요청용입니다.
+pub fn read_string_preference(key: &str) -> Option<String> {
+    read_from_storage::<StringPref>(key)
+}
+
 /// 지정된 `PreferenceAccess` 타입의 접두사를 사용하여 로컬 스토리지에 값을 저장합니다.
 fn write_to_storage<T: PreferenceAccess>(key: &str, value: &str) -> Result<(), ()> {
     let ls = get_local_storage().ok_or(())?;

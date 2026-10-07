@@ -1,0 +1,30 @@
+priority = "Normal"
+hidden = false
+icon = """
+...#####...
+.##.....##.
+#.........#
+#.........#
+#.........#
+#.........#
+#.........#
+#.........#
+#.........#
+.##.....##.
+...#####...
+"""
+
+[category]
+ko = "유틸리티"
+en = "Utility"
+ja = "ユーティリティ"
+
+[name]
+ko = "점자 실험"
+en = "Tactile Experiment"
+ja = "触覚実験"
+
+[description]
+ko = "원의 진동이 멈추는 순간 키를 눌러, 누른 시각과의 차이를 20회 기록하는 촉각 반응 실험"
+en = "Tactile timing experiment: press when the vibrating circle stops; 20 timing differences are recorded"
+ja = "円の振動が止まる瞬間にキーを押し、時刻の差を20回記録する触覚反応実験"

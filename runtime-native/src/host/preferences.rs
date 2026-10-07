@@ -155,6 +155,14 @@ impl AppSettings {
 }
 
 /// WASM 인스턴스의 메모리를 가져오는 헬퍼 함수
+/// 애플릿이 저장한 문자열 설정값을 읽습니다.
+///
+/// PC 도구가 USB/TCP 로 `GetPreferenceString` 을 보냈을 때 씁니다
+/// (`usb_serial.rs`, `net_comm.rs`). 애플릿 쪽 `preferences.get_string` 과 같은 저장소입니다.
+pub fn read_string_preference(key: &str) -> Option<String> {
+    PreferenceStore::get().strings.get(key).cloned()
+}
+
 fn get_memory(caller: &mut Caller<'_, HostState>) -> Option<wasmtime::Memory> {
     if let Some(Extern::Memory(mem)) = caller.get_export("memory") {
         Some(mem)

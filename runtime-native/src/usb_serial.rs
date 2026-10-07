@@ -260,6 +260,13 @@ pub async fn start_usb_serial(
                     }
                     let _ = tx.send(CaptureResponseFromRuntime::Ok).await;
                 }
+                CaptureRequestToRuntime::GetPreferenceString { key } => {
+                    info!("Received GetPreferenceString request: {}", key);
+                    let value = crate::host::preferences::read_string_preference(&key);
+                    let _ = tx
+                        .send(CaptureResponseFromRuntime::PreferenceStringResult(value))
+                        .await;
+                }
             }
         }
         info!("USB Serial application logic terminated.");

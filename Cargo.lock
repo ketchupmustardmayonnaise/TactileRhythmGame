@@ -7833,6 +7833,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tactile-experiment"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "sdk",
+]
+
+[[package]]
 name = "tactile-game"
 version = "0.1.0"
 dependencies = [
