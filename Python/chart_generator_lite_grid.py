@@ -21,12 +21,12 @@
     python chart_generator_lite_grid.py --test-modes
     python chart_generator_lite_grid.py --test-modes --min-gap 1.5
 
-    python chart_generator_lite.py <오디오파일> --keys 2 [--difficulty easy|normal]
-    python chart_generator_lite.py song.mp3 --keys 4 --output song_4k.json
+    python chart_generator_lite_grid.py <오디오파일> --keys 2 [--difficulty easy|normal]
+    python chart_generator_lite_grid.py song.mp3 --keys 4 --output song_4k.json
     # 격자 조정 예: 8분음표 격자 + 격자에서 먼 노트 정리
-    python chart_generator_lite.py song.mp3 --keys 4 --subdiv 2 --snap-tolerance 0.3
+    python chart_generator_lite_grid.py song.mp3 --keys 4 --subdiv 2 --snap-tolerance 0.3
     # 멜로디(하모닉) 성분만으로 onset 감지
-    python chart_generator_lite.py song.mp3 --keys 4 --harmonic
+    python chart_generator_lite_grid.py song.mp3 --keys 4 --harmonic
 
 출력 JSON은 게임의 SongLoader가 읽는 형식과 동일하며 lane은 1-based로 저장한다
 (2key → lane 1~2, 4key → lane 1~4). 만든 파일은 Assets/Resources/Songs/ 에 넣는다.
@@ -53,11 +53,10 @@ except ImportError:
 
 # ── 난이도 프리셋 ───────────────────────────────────────────
 # min_gap  : 노트 사이 최소 간격(초) — 클수록 쉬움. 하한 0.5.
-# approach : 노트가 다가오는 예고 시간(초) — 게임 previewWindow. 클수록 쉬움.
 # chord_ratio: 2key 동시치기 비율(0~1). 4key에서는 무시.
 DIFFICULTY = {
-    "easy":   {"min_gap": 0.70, "approach": 0.80, "chord_ratio": 0.10},
-    "normal": {"min_gap": 0.50, "approach": 0.65, "chord_ratio": 0.18},
+    "easy":   {"min_gap": 0.70, "chord_ratio": 0.10},
+    "normal": {"min_gap": 0.50, "chord_ratio": 0.18},
 }
 
 MIN_CHORD_GAP = 1.2   # 동시치기끼리 최소 간격(초): 너무 자주/연속으로 안 나오게
@@ -235,14 +234,14 @@ def to_notes(events):
     return notes
 
 
-def save_chart(notes, audio_path, keys, difficulty, approach, bpm, output_path):
+def save_chart(notes, audio_path, keys, difficulty, bpm, output_path):
     import os
     data = {
         "source":     os.path.basename(audio_path),   # 오디오는 6key와 공유
         "difficulty": f"{keys}k-{difficulty}",
         "meta": {
             "bpm":              round(float(bpm), 4),
-            "seconds_per_beat": round(float(approach), 4),   # 게임 previewWindow로 사용됨
+            "seconds_per_beat": round(60.0 / bpm, 6) if bpm > 0 else 0.0,
         },
         "notes": notes,
     }
@@ -295,7 +294,6 @@ if __name__ == "__main__":
     cfg      = DIFFICULTY[args.difficulty]
     min_gap  = max(0.5, args.min_gap if args.min_gap is not None else cfg["min_gap"])
     chord    = args.chord_ratio if args.chord_ratio is not None else cfg["chord_ratio"]
-    approach = cfg["approach"]
 
     print(f"[1/4] 오디오 로딩: {args.audio}")
     y, sr    = librosa.load(args.audio, sr=None, mono=True)
@@ -325,4 +323,4 @@ if __name__ == "__main__":
     output = args.output or (args.audio.rsplit(".", 1)[0] + f"_{args.keys}k.json")
 
     print_summary(events, counts, args.keys)
-    save_chart(notes, args.audio, args.keys, args.difficulty, approach, bpm, output)
+    save_chart(notes, args.audio, args.keys, args.difficulty, bpm, output)

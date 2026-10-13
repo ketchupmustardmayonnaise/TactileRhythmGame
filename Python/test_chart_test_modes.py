@@ -26,6 +26,8 @@ class TestCharts(unittest.TestCase):
         self.assertEqual([n["time"] for n in charts["single"]["notes"]], [0, 1.25, 2.5])
         self.assertEqual([n["lane"] for n in charts["easy"]["notes"]], [1, 2, 1])
         self.assertEqual({n["lane"] for n in charts["single"]["notes"]}, {1})
+        for chart in charts.values():
+            self.assertEqual(chart["meta"]["seconds_per_beat"], 0.5)  # 60 / 120bpm
 
     def test_source_unchanged_and_results_independent(self):
         original = copy.deepcopy(self.source)

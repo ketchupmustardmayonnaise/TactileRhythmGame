@@ -119,12 +119,11 @@ def draw_glow(surf, color, rect, radius=6, spread=6):
 # ══════════════════════════════════════════════════════════
 
 class Recorder:
-    def __init__(self, audio_path, keys, offset_ms, approach, bpm,
+    def __init__(self, audio_path, keys, offset_ms, bpm,
                  difficulty, countin, output_path):
         self.audio_path  = audio_path
         self.lane_count  = keys
         self.offset      = offset_ms / 1000.0     # 기록 시각에서 빼줄 지연 보정(초)
-        self.approach    = approach               # meta.seconds_per_beat (게임 previewWindow)
         self.bpm         = bpm
         self.difficulty  = difficulty
         self.countin     = max(0, countin)
@@ -243,7 +242,7 @@ class Recorder:
             "difficulty": f"{self.lane_count}k-{self.difficulty}",
             "meta": {
                 "bpm":              round(float(self.bpm), 4),
-                "seconds_per_beat": round(float(self.approach), 4),
+                "seconds_per_beat": round(60.0 / self.bpm, 6) if self.bpm > 0 else 0.0,
             },
             "notes": notes,
         }
@@ -420,10 +419,8 @@ if __name__ == "__main__":
     parser.add_argument("--keys", type=int, choices=[2, 4], required=True)
     parser.add_argument("--offset", type=float, default=0.0,
                         help="입력 지연 보정(ms). 양수면 기록 시각을 그만큼 앞당김. 기본 0")
-    parser.add_argument("--approach", type=float, default=0.8,
-                        help="meta.seconds_per_beat 값(게임 previewWindow). 기본 0.8")
     parser.add_argument("--bpm", type=float, default=0.0,
-                        help="meta.bpm 값. 미지정 시 0")
+                        help="meta.bpm 값(seconds_per_beat = 60/bpm). 미지정 시 0")
     parser.add_argument("--difficulty", default="manual",
                         help="difficulty 라벨. 결과는 '<keys>k-<라벨>'. 기본 manual")
     parser.add_argument("--countin", type=float, default=3.0,
@@ -438,5 +435,5 @@ if __name__ == "__main__":
 
     print(f"[레코더] {args.keys}key  키: {' '.join(KEY_LAYOUT[args.keys])}")
     print(f"  저장 위치: {output}")
-    Recorder(args.audio, args.keys, args.offset, args.approach, args.bpm,
+    Recorder(args.audio, args.keys, args.offset, args.bpm,
              args.difficulty, args.countin, output).run()

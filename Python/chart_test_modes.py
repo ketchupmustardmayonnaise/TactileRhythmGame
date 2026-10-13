@@ -48,13 +48,18 @@ def make_test_charts(source, min_gap=1.25):
         kept.append({"time": time, "lane": lane})
         last_time = time
 
+    bpm = (source.get("meta") or {}).get("bpm", 0)
+    if isinstance(bpm, bool) or not isinstance(bpm, (int, float)) or not math.isfinite(bpm) or bpm < 0:
+        raise ValueError(f"잘못된 bpm: {bpm!r}")
+    seconds_per_beat = round(60.0 / bpm, 6) if bpm > 0 else 0.0  # bpm을 모르면(0) 0
+
     result = {}
     for mode, keys in MODES.items():
         chart = copy.deepcopy(source)
         chart["difficulty"] = mode
         chart["meta"] = dict(chart.get("meta") or {})
         chart["meta"].update({
-            "seconds_per_beat": 0.3,  # 기존 로더의 예고 시간 메타데이터 규약
+            "seconds_per_beat": seconds_per_beat,
             "test_mode": mode,
             "keys": keys,
             "min_gap_seconds": min_gap,

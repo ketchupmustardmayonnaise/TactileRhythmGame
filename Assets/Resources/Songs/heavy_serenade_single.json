@@ -3,7 +3,7 @@
   "difficulty": "single",
   "meta": {
     "bpm": 130.814,
-    "seconds_per_beat": 0.3,
+    "seconds_per_beat": 0.458667,
     "test_mode": "single",
     "keys": 1,
     "min_gap_seconds": 1.25,
