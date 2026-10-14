@@ -15,7 +15,22 @@ public class AudioManager : MonoBehaviour
     {
         if (Instance == null) { Instance = this; DontDestroyOnLoad(gameObject); }
         else { Destroy(gameObject); return; }
-        src = GetComponent<AudioSource>();
+        EnsureSource();
+    }
+
+    /// <summary>
+    /// AudioSource(src)가 비어 있으면 다시 확보한다.
+    /// Awake 실행 순서나 컴포넌트 누락으로 src가 null이 되어도
+    /// SchedulePlay/Stop 등에서 NRE가 나지 않도록 하는 안전장치.
+    /// </summary>
+    private AudioSource EnsureSource()
+    {
+        if (src == null)
+        {
+            src = GetComponent<AudioSource>();
+            if (src == null) src = gameObject.AddComponent<AudioSource>();
+        }
+        return src;
     }
 
     /// <param name="clip">재생할 클립</param>
@@ -23,6 +38,9 @@ public class AudioManager : MonoBehaviour
     /// <param name="offset">SongData.offset — 오디오 시작 오프셋</param>
     public void SchedulePlay(AudioClip clip, float delaySeconds, float offset = 0f)
     {
+        EnsureSource();
+        src.Stop();
+        src.loop = false;
         src.clip = clip;
         clipOffset = offset;
         scheduledStartDsp = AudioSettings.dspTime + delaySeconds;
@@ -32,6 +50,7 @@ public class AudioManager : MonoBehaviour
 
     public void Stop()
     {
+        EnsureSource();
         src.Stop();
         scheduled = false;
     }
@@ -42,5 +61,17 @@ public class AudioManager : MonoBehaviour
     public double SongTime =>
         scheduled ? AudioSettings.dspTime - scheduledStartDsp + clipOffset : 0.0;
 
-    public bool IsPlaying => src.isPlaying;
+    public bool IsPlaying => EnsureSource().isPlaying;
+
+    /// <summary>예약 재생 전·수동 정지를 제외하고 음원 끝까지 재생했을 때만 true.</summary>
+    public bool HasPlaybackFinished
+    {
+        get
+        {
+            var source = EnsureSource();
+            return scheduled && source.clip != null
+                && AudioSettings.dspTime - scheduledStartDsp >= source.clip.length
+                && !source.isPlaying;
+        }
+    }
 }

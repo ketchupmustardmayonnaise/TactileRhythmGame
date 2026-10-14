@@ -7,7 +7,7 @@ v1 대비 개선:
   3. BPM (tempo) 감지 및 채보 헤더 저장
 
 사용법:
-    python chart_generator_v2.py <오디오파일> [--difficulty easy|medium|hard] [--output out.chart]
+    python chart_generator.py <오디오파일> [--difficulty easy|medium|hard] [--output out.chart]
 """
 
 import sys, argparse
