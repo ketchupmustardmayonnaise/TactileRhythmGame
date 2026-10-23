@@ -8,13 +8,15 @@ use audio::{AudioPlayer, PlaybackCategory};
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{Query, State},
+    extract::{DefaultBodyLimit, Query, State},
     response::IntoResponse,
     routing::{get, post},
 };
 use config::ServiceConfig;
 use error::Result;
-use runtime_common::audio::protocol::{PlaySequenceRequest, SequenceSegment};
+use runtime_common::audio::protocol::{
+    PlaySequenceRequest, SequenceSegment, TTS_SERVICE_MAX_AUDIO_SIZE,
+};
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
@@ -74,6 +76,12 @@ async fn main() -> Result<()> {
         .route("/audio_segments", post(handle_audio_segments))
         .route("/volume", post(handle_set_volume))
         .route("/settings", post(handle_update_settings))
+        // 본문 크기 상한을 런타임 쪽 검사와 맞춥니다.
+        //
+        // axum 의 기본값은 2MB 라서, 런타임이 `TTS_SERVICE_MAX_AUDIO_SIZE`(5MB) 로
+        // 통과시킨 요청을 서버가 413 으로 되돌려보내는 일이 있었습니다.
+        // 2.4MB 짜리 mp3 를 재생하면 소리가 안 나는데 애플릿은 아무것도 모르는 상태가 됩니다.
+        .layer(DefaultBodyLimit::max(TTS_SERVICE_MAX_AUDIO_SIZE))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

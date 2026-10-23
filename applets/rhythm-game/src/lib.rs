@@ -1,145 +1,237 @@
-//! 리듬 게임 애플릿
+//! TactileRhythm — 점자 디스플레이용 2키 촉각 리듬 애플릿
 //!
-//! 화면 중앙에 원이 하나 있고, 노트 시각이 다가올수록 이 원의 진동이 점점 강해집니다.
-//! 기본값은 기기 부팅/종료 애니메이션과 같은 PWM 강도 램프(`VibrationMode::DutyRatio`)입니다.
-//! 진동이 최고조에 달하는 순간(= 노트 시각)에 가운데 키(웹 시뮬레이터의 `Space`)를 누르면 됩니다.
+//! 화면 좌우에 큰 원이 하나씩 있고, 노트 시각이 다가오면 해당 쪽 원이 진동합니다.
+//! 왼쪽 원은 `Space`, 오른쪽 원은 `Enter` 로 칩니다.
 //!
-//! 흐름
-//! 1. 곡 선택 화면 — 좌/우 키로 곡을 고르면 곡 이름을 음성으로 읽어 줍니다.
-//! 2. 가운데 키(`Enter`)를 누르면 음악이 재생되면서 게임이 시작됩니다.
-//! 3. 노트마다 `예고 시간` 동안 원이 진동하며, 그 끝에서 가운데 키(`Space`)를 누릅니다.
-//! 4. 기능 키(`E`)를 누르면 진동 방식 두 가지가 번갈아 전환되고, 바뀐 방식을 음성으로 알려 줍니다.
+//! 두 가지 모드가 있습니다.
+//! * **리듬게임** — 예고(2단계) → 타격 대기(HOLDING). 치면 진동이 끊깁니다.
+//! * **감상** — 입력 없이, 노트 시각을 한가운데 두고 전후로 진동만 흘려 보냅니다.
 //!
-//! 채보는 `src/audio/*.json` 에서 읽습니다. `meta.seconds_per_beat` 이 예고 시간의 기본값이고,
-//! `LEAD_OVERRIDE_MS` 로 덮어쓸 수 있습니다. 예고는 항상 노트 시각 *이전에* 시작합니다.
-//! (노트 1.465초, 예고 150ms → 1.315초부터 진동)
+//! 모드·프리셋·곡 변경은 **대기 화면에서만** 됩니다. 연주 중에는 타격 키만 받습니다.
+//!
+//! 바꾸고 싶은 값은 전부 아래 "설정" 구역에 모아 두었습니다.
 
 use std::time::Duration;
 
-use graphics::{Graphics, style::Style};
 use sdk::Applet;
 use sdk::api::context::Context;
 use sdk::api::display::{DisplayInterface, Intensity, Point, Size};
-use sdk::api::keypad::{KeyCode, KeyState, KeypadPopResult, KeypadSide};
+use sdk::api::keypad::{KeyCode, KeyState, KeypadEvent, KeypadPopResult, KeypadSide};
 use sdk::applet::{LocalizedString, SpeechOption, SpeechResult};
 use sdk::error::Result;
 use sdk::event::UpdateResult;
 use sdk::types::Language;
 use serde::Deserialize;
 
-// ---------------------------------------------------------------------------
-// 튜닝 상수
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 설정 — 바꾸고 싶은 것은 전부 여기에 있습니다
+// ===========================================================================
 
-/// 노트가 다가올 때 원이 반응하는 방식입니다.
+/// 키 하나를 좌/우 키패드까지 포함해 가리킵니다.
 ///
-/// 점자 핀은 물리적으로 두 가지 다른 방식으로 움직일 수 있고, 손끝에 닿는 느낌이 완전히 다릅니다.
-/// 펌웨어의 핀 구동 루프(`firmware/src/braille_display.rs`)를 보면:
-///
-/// * **PWM 강도** — 약 62.5Hz 고정 반송파의 듀티비를 바꿉니다. 세기가 서서히 차오르는 느낌.
-///   기기 부팅/종료 애니메이션이 바로 이 방식입니다.
-/// * **점멸(blink)** — 1·2·4·8·16·32Hz 중 하나로 핀을 완전히 올렸다 내립니다. 또각또각 끊기는 느낌.
-///
-/// 두 방식은 `tactile-display-demo` 의 `Static8` / `Blink8` 과 정확히 같은 것을,
-/// 공간(상자 8개)이 아니라 시간축(예고 구간)에 펼친 것입니다.
-/// 실기에서 바로 비교할 수 있도록 **기능 키(Function)로 전환**합니다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VibrationMode {
-    /// 약 62.5Hz 반송파의 **듀티비**로 세기를 냅니다.
-    /// 기기 부팅·종료 애니메이션과 같은 방식입니다.
-    /// (`tactile-display-demo` 의 `Static8`, `firmware/src/shutdown_animation.rs`)
-    DutyRatio,
-    /// 같은 단계를 하드웨어 **점멸 주기**로 냅니다.
-    /// 1~6 단계가 1·2·4·8·16·32Hz, 7 단계는 항상 켜짐입니다.
-    /// (`tactile-display-demo` 의 `Blink8`)
-    BlinkPeriod,
+/// 웹 시뮬레이터 라벨과의 대응은 `runtime-web/src/runner.rs` 를 보세요.
+/// 왼쪽 키패드: W=Up, S=Down, A=Left, D=Right, Space=Center, Q=Menu, E=Function
+/// 오른쪽 키패드: 방향키, Enter=Center
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Key {
+    code: KeyCode,
+    side: KeypadSide,
 }
 
-/// 애플릿을 켰을 때의 기본 방식입니다.
-const DEFAULT_VIBRATION_MODE: VibrationMode = VibrationMode::DutyRatio;
-
-impl VibrationMode {
-    /// 이 방식에서 쓸 수 있는 단계 범위입니다.
-    /// 두 방식 모두 하드웨어 전 범위(0~7)를 씁니다.
-    fn level_range(self) -> (u8, u8) {
-        (MIN_VIBRATION_LEVEL, MAX_VIBRATION_LEVEL)
+impl Key {
+    const fn new(code: KeyCode, side: KeypadSide) -> Self {
+        Self { code, side }
     }
-
-    /// 기능 키를 누를 때마다 다른 방식으로 넘어갑니다.
-    fn next(self) -> Self {
-        match self {
-            VibrationMode::DutyRatio => VibrationMode::BlinkPeriod,
-            VibrationMode::BlinkPeriod => VibrationMode::DutyRatio,
-        }
-    }
-
-    /// 전환 시 음성으로 읽어 줄 이름입니다. 시연 중 지금 무엇을 만지고 있는지 알려 줍니다.
-    fn label(self, lang: Language) -> &'static str {
-        match (self, lang) {
-            (VibrationMode::DutyRatio, Language::Ko) => {
-                "듀티 레이시오 기반. 부팅 애니메이션과 같은 방식입니다."
-            }
-            (VibrationMode::BlinkPeriod, Language::Ko) => {
-                "주기 기반. 하드웨어가 직접 깜빡입니다."
-            }
-            (VibrationMode::DutyRatio, Language::Ja) => {
-                "強さの立ち上がり。起動アニメーションと同じ方式です。"
-            }
-            (VibrationMode::BlinkPeriod, Language::Ja) => "点滅8段階。ハードウェアが点滅します。",
-            (VibrationMode::DutyRatio, _) => "Intensity swell, same as the boot animation.",
-            (VibrationMode::BlinkPeriod, _) => "Eight blink steps, driven by the hardware.",
-        }
+    fn matches(self, event: &KeypadEvent) -> bool {
+        event.code == self.code && event.side == self.side
     }
 }
 
-/// 진동 단계의 범위. **단계 번호가 곧 하드웨어 4비트 코드**입니다.
-///
-/// 내부는 0~7, 사람에게는 1~8단계로 말합니다(`spoken_level`).
-///
-/// 듀티는 펌웨어가 정합니다. `counter` 가 16씩 도는 16칸이고 `threshold = 코드 * 32`
-/// 이므로(`firmware/src/braille_display.rs`) 12.5% 간격입니다.
-///
-/// | 단계 | 코드 | 듀티 |
-/// |---|---|---|
-/// | 1 | 0 | 0% (꺼짐) |
-/// | 2 | 1 | 12.5% |
-/// | 3 | 2 | 25% |
-/// | 4 | 3 | 37.5% |
-/// | 5 | 4 | 50% |
-/// | 6 | 5 | 62.5% |
-/// | 7 | 6 | 75% |
-/// | 8 | 7 | **100%** (87.5% 가 아닙니다) |
-///
-/// 마지막 단계만 간격이 어긋납니다. 펌웨어가 코드 7 을 `7 => true` 로 특수 처리해
-/// 듀티 계산을 건너뛰고 항상 켜 두기 때문입니다. 애플릿에서는 못 고칩니다 —
-/// 4비트 코드 0~15 중 87.5% 를 내는 것이 하나도 없습니다.
-const MIN_VIBRATION_LEVEL: u8 = 0;
-const MAX_VIBRATION_LEVEL: u8 = 7;
+// --- 키 배치 ---------------------------------------------------------------
 
-/// 켰을 때의 기본 단계. A/D 키로 바꿉니다.
-const DEFAULT_VIBRATION_LEVEL: u8 = MAX_VIBRATION_LEVEL;
+/// 왼쪽 원 타격
+const KEY_HIT_LEFT: Key = Key::new(KeyCode::Center, KeypadSide::Left);
+/// 오른쪽 원 타격
+const KEY_HIT_RIGHT: Key = Key::new(KeyCode::Center, KeypadSide::Right);
+/// 모드 전환 (리듬게임 ↔ 감상) — **대기 화면에서만.**
+const KEY_MODE: Key = Key::new(KeyCode::Function, KeypadSide::Left);
+
+/// 진동 프리셋 — 누를 때마다 다음 것으로 넘어가고 끝에서 처음으로 돌아옵니다.
+/// **대기 화면에서만.**
+const KEY_PRESET_NEXT: Key = Key::new(KeyCode::Down, KeypadSide::Left);
+/// 다음 곡 — 누를 때마다 다음 곡으로 넘어가고 끝에서 처음으로 돌아옵니다.
+/// **대기 화면에서만.**
+const KEY_SONG_NEXT: Key = Key::new(KeyCode::Up, KeypadSide::Left);
+
+/// 타격 키와 다른 키가 겹치면 **컴파일이 실패합니다.**
+///
+/// 겹쳐도 오류가 안 나고 조용히 한쪽이 안 먹히기 때문에, 빌드 때 잡습니다.
+const _NO_KEY_CONFLICT: () = {
+    let hits = [KEY_HIT_LEFT, KEY_HIT_RIGHT];
+    // 타격 키는 `KEY_START` 와 같아도 됩니다. 연주 중에만 타격으로 흘러가기 때문입니다.
+    // 반면 아래 키들은 대기 화면에서 타격 키보다 **뒤에** 검사되므로, 겹치면 죽습니다.
+    let others = [KEY_MODE, KEY_PRESET_NEXT, KEY_SONG_NEXT];
+    let mut i = 0;
+    while i < hits.len() {
+        let mut j = 0;
+        while j < others.len() {
+            assert!(
+                !(hits[i].code as u8 == others[j].code as u8
+                    && hits[i].side as u8 == others[j].side as u8),
+                "타격 키가 다른 키와 겹칩니다. 겹친 키는 타격으로만 동작하고 본래 기능은 죽습니다."
+            );
+            j += 1;
+        }
+        i += 1;
+    }
+};
+
+/// 연주 시작 / 결과 화면에서 대기로 돌아가기. **양쪽 키패드의 가운데 키.**
+const KEY_START: KeyCode = KeyCode::Center;
+
+/// 연주 중단 / 애플릿 종료. 양쪽 키패드 모두 받습니다.
+const KEY_EXIT: KeyCode = KeyCode::Menu;
+
+/// 연주 시작 전 카운트다운에 읽을 문구. 한 칸씩 간격을 두고 하나씩 읽습니다.
+const COUNTDOWN: &[&str] = &["3", "2", "1"];
+
+/// 카운트다운 한 칸의 길이(ms)
+const COUNTDOWN_STEP_MS: u64 = 1_000;
+
+/// 연주할 때 음악의 **트랙 음량** (0.0 ~ 1.0).
+///
+/// audio-service 는 `최종 = 샘플 × 트랙음량 × 마스터음량` 으로 섞습니다.
+/// 마스터는 기기 설정(소리 크기)이 정하므로, 애플릿은 트랙 음량만 정하면 됩니다.
+/// 1.0 = "이 소리를 줄이지 않음" 이고, 기기 설정은 그 위에 그대로 적용됩니다.
+///
+/// `context.audio.play()` 를 쓰지 않는 이유: 런타임이 **기기 설정값을 트랙 음량으로
+/// 한 번 더** 실어 보내서 음량이 제곱으로 작아집니다
+/// (`runtime-native/src/host/audio.rs`). 설정이 10% 면 실제로는 1% 가 됩니다.
+const MUSIC_VOLUME: f32 = 1.0;
+
+/// 대기 화면에서 곡을 고를 때 배경으로 틀어 줄 **트랙 음량**.
+///
+/// 어떤 곡인지 알아들을 만큼은 되고, 안내 음성과 연주를 덮지는 않을 정도로 잡습니다.
+/// `MUSIC_VOLUME` 보다 작아야 미리듣기가 본 연주보다 커지는 일이 없습니다.
+const PREVIEW_VOLUME: f32 = 0.25;
+
+/// audio-service 의 소리 재생 주소
+const SOUND_URL: &str = "http://127.0.0.1:3005/sound";
+
+// --- 타이밍 ----------------------------------------------------------------
+
+/// 예고 시간(ms).
+///
+/// * 리듬게임 — 노트 시각 `t` 기준 `[t - 이 값, t]` 을 **절반으로 갈라** 2단계로 진동합니다.
+/// * 감상 — `t` 를 한가운데 두고 `[t - 이 값/2, t + 이 값/2]` 를 2단계로 진동합니다.
+///
+/// 채보의 `meta.seconds_per_beat` 대신 이 값을 씁니다.
+const CUE_MS: u32 = 220;
+
+/// 리듬게임 모드에서 타격을 기다리며 진동을 유지하는 최대 시간(ms).
+///
+/// 노트 시각부터 시작해, 사용자가 치거나 이 시간이 지나면 꺼집니다.
+const HOLD_MAX_MS: u32 = 500;
+
+/// 진동을 **미리 내보내는** 시간(ms).
+///
+/// 원 하나가 448핀이라 바뀔 때마다 런타임이 전체 프레임(773바이트)을 보내고,
+/// 115,200baud 에서 그 전송에 약 67ms 가 걸립니다. 그래서 "이 시각에 손끝이
+/// 바뀌었으면" 하는 시점보다 이만큼 앞서 데이터를 띄웁니다.
+///
+/// **끄는 것은 미리 보내지 않습니다.** 끌 때는 정확히 그 시각에 내보냅니다
+/// (`VibrationPlan::value_at` 참고).
+const PRE_SEND_MS: u32 = 67;
+
+/// 대기 화면에서 예고 패턴을 한 번 보여 준 뒤, 다음 반복까지 쉬는 시간(ms).
+///
+/// 쉼 없이 이어 붙이면 패턴이 아니라 그냥 계속 윙윙대는 느낌이 됩니다.
+/// `tactile-experiment` 의 대기 화면과 같은 방식입니다.
+const STANDBY_PAUSE_MS: u32 = 1_000;
+
+// --- 진동 프리셋 -----------------------------------------------------------
+//
+// 숫자는 **4비트 전송 코드**입니다. 0~7 은 듀티비(0%, 12.5% … 100%),
+// 8~15 는 하드웨어 점멸(8=꺼짐, 9~14=1·2·4·8·16·32Hz, 15=항상 켜짐)입니다.
+// `code_to_intensity` 가 이 숫자를 그대로 하드웨어 코드로 보냅니다.
+
+/// 리듬게임 프리셋: `[예고 1단계, 예고 2단계, HOLDING]`
+const RHYTHM_PRESETS: &[[u8; 3]] = &[[3, 7, 0], [3, 7, 2], [1, 5, 7]];
+
+/// 감상 프리셋: `[앞 절반, 뒤 절반]`
+const LISTEN_PRESETS: &[[u8; 2]] = &[[1, 5], [6, 2]];
+
+// --- 화면 ------------------------------------------------------------------
+
+/// 원의 지름(핀). 화면 절반 너비와 높이에 맞춰 자동으로 줄어듭니다.
+///
+/// **이 값을 줄이면 안 됩니다.** 원 하나가 384핀을 넘어야 런타임이 차이 전송 대신
+/// 전체 프레임을 보내고, 그래야 갱신 시간이 핀 개수와 무관하게 67ms 로 고정됩니다
+/// (`runtime-native/src/hal/display/braille_display.rs` 의 `is_full_frame`).
+/// 48x32 화면에서 지름 24 면 원 하나가 448핀입니다.
+const CIRCLE_DIAMETER: i16 = 24;
+
+// --- 안내 음성 -------------------------------------------------------------
+
+/// 3개 국어 문자열. 음성과 도움말에 씁니다.
+struct L10n {
+    ko: &'static str,
+    en: &'static str,
+    ja: &'static str,
+}
+
+impl L10n {
+    const fn new(ko: &'static str, en: &'static str, ja: &'static str) -> Self {
+        Self { ko, en, ja }
+    }
+    fn get(&self, lang: Language) -> &'static str {
+        match lang {
+            Language::Ko => self.ko,
+            Language::En => self.en,
+            Language::Ja => self.ja,
+        }
+    }
+}
+
+const TEXT_MODE_RHYTHM: L10n = L10n::new("리듬 게임 모드", "Rhythm mode", "リズムゲームモード");
+const TEXT_MODE_LISTEN: L10n = L10n::new("감상 모드", "Listening mode", "鑑賞モード");
+const TEXT_PRESET: L10n = L10n::new("진동 프리셋", "Vibration preset", "振動プリセット");
+const TEXT_NO_SONG: L10n = L10n::new(
+    "재생할 수 있는 곡이 없습니다.",
+    "No songs available.",
+    "再生できる曲がありません。",
+);
+
+// ===========================================================================
+// 설정 끝 — 아래는 구현입니다
+// ===========================================================================
+
+// --- 하드웨어로 나가는 값 ---------------------------------------------------
+
+/// 4비트 전송 코드를 `Intensity` 로 바꿉니다.
+///
+/// 런타임이 `map_intensity_to_4bit` 으로 되돌릴 때 같은 코드가 나오도록 맞춥니다
+/// (`runtime-native/src/hal/display/mod.rs`).
+/// * 0~7 — 듀티비. `value = 코드 * 255 / 7`
+/// * 8~15 — 점멸. 같은 식에 `blink` 플래그를 세웁니다 (런타임이 `8 + 레벨` 로 만듭니다).
+fn code_to_intensity(code: u8) -> Intensity {
+    let (level, blink) = if code >= 8 { (code - 8, true) } else { (code, false) };
+    let value = (level.min(7) as u16 * 255 / 7) as u8;
+    if blink {
+        Intensity::new_blink(value)
+    } else {
+        Intensity::new(value)
+    }
+}
 
 /// `blink` 플래그를 보존하면서 채워진 원을 그립니다.
 ///
-/// **`graphics` 확장의 `draw_circle`/`draw_rectangle` 을 쓰면 안 됩니다.**
-/// 그 경로는 `embedded-graphics` 의 `Gray8`(8비트 밝기 하나)로 색을 다루고,
-/// 픽셀을 찍을 때 `Intensity::from(color.luma())` 로 되돌립니다
-/// (`extensions/graphics/src/lib.rs`). `luma()` 는 `u8` 뿐이라
-/// **`blink` 가 그 지점에서 조용히 버려집니다.** 점멸 모드가 듀티 모드로 둔갑합니다.
-///
-/// `tactile-display-demo` 의 격자가 제대로 깜빡이는 이유도 이것입니다 —
-/// 거기서는 `display.set_pin(point, intensity)` 로 `Intensity` 를 통째로 넘깁니다
-/// (`extensions/widget/src/item_selector/grid.rs`).
-fn fill_circle(
-    canvas: &mut dyn DisplayInterface,
-    center: Point,
-    diameter: i16,
-    intensity: Intensity,
-) {
-    // `graphics` 의 `draw_circle` 과 같은 기준점 계산입니다.
+/// **`graphics` 확장의 `draw_circle` 을 쓰면 안 됩니다.** 그 경로는 `embedded-graphics`
+/// 의 `Gray8`(8비트 밝기 하나)을 거치고 `Intensity::from(color.luma())` 로 되돌리기
+/// 때문에 `blink` 가 조용히 사라집니다 (`extensions/graphics/src/lib.rs`).
+fn fill_circle(canvas: &mut dyn DisplayInterface, center: Point, diameter: i16, intensity: Intensity) {
     let top_left_x = center.x - diameter / 2;
     let top_left_y = center.y - diameter / 2;
-    // 중심을 반 픽셀 보정해 두 방식의 모양을 맞춥니다.
     let cx = top_left_x as f32 + (diameter as f32 - 1.0) / 2.0;
     let cy = top_left_y as f32 + (diameter as f32 - 1.0) / 2.0;
     let r = diameter as f32 / 2.0;
@@ -155,193 +247,136 @@ fn fill_circle(
     }
 }
 
-/// 점멸 모드에서 한 단계가 내는 주파수(Hz)입니다. 7단계는 항상 켜짐이라 없습니다.
-///
-/// 펌웨어가 4비트 코드 9~14 를 반주기 500·250·125·62.5·31.25·15.625ms 로 해석합니다
-/// (`firmware/src/braille_display.rs`). 런타임이 `8 + 레벨` 로 코드를 만드므로
-/// 레벨 1~6 이 코드 9~14, 레벨 7 이 코드 15(항상 켜짐)가 됩니다.
-fn blink_frequency_hz(level: u8) -> Option<f32> {
-    match level {
-        1 => Some(1.0),
-        2 => Some(2.0),
-        3 => Some(4.0),
-        4 => Some(8.0),
-        5 => Some(16.0),
-        6 => Some(32.0),
-        _ => None,
+/// 화면에 들어가는 선에서의 원 지름입니다. 좌우 두 개가 겹치지 않아야 합니다.
+fn circle_diameter(size: Size) -> i16 {
+    CIRCLE_DIAMETER.min(size.width / 2).min(size.height).max(2)
+}
+
+// --- 모드 ------------------------------------------------------------------
+
+/// 연주 방식입니다. 대기 화면에서 `KEY_MODE` 로 전환합니다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayMode {
+    /// 예고 2단계 → HOLDING. 사용자가 칩니다.
+    Rhythm,
+    /// 입력 없이 노트 시각 전후로 진동만 흘려 보냅니다.
+    Listen,
+}
+
+impl PlayMode {
+    fn next(self) -> Self {
+        match self {
+            PlayMode::Rhythm => PlayMode::Listen,
+            PlayMode::Listen => PlayMode::Rhythm,
+        }
+    }
+    fn label(self) -> &'static L10n {
+        match self {
+            PlayMode::Rhythm => &TEXT_MODE_RHYTHM,
+            PlayMode::Listen => &TEXT_MODE_LISTEN,
+        }
+    }
+    /// 이 모드의 프리셋 개수
+    fn preset_count(self) -> usize {
+        match self {
+            PlayMode::Rhythm => RHYTHM_PRESETS.len(),
+            PlayMode::Listen => LISTEN_PRESETS.len(),
+        }
     }
 }
 
-/// 내부 레벨(0~7)을 **사람에게 말할 번호(1~8)** 로 바꿉니다.
-///
-/// 내부는 하드웨어 4비트 코드와 1:1 로 맞춰 둡니다 — 펌웨어·런타임 계산이 전부
-/// 0 기준이라, 여기서 어긋나면 변환이 하나 더 끼어들어 조용히 한 칸씩 밀립니다.
-/// 사람에게는 "0단계"가 어색하므로 말할 때만 1 을 더합니다.
-///
-/// 그러니 로그와 음성은 **반드시 이 함수를 거쳐야** 합니다.
-fn spoken_level(level: u8) -> u8 {
-    level + 1
+/// 좌우 두 원 중 어느 쪽인지.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Left,
+    Right,
 }
 
-/// 단계(= 하드웨어 레벨 0~7)를 그 레벨이 나오는 강도값으로 바꿉니다.
-///
-/// 런타임이 `(v*7+127)/255` 로 양자화하므로, 그 역함수에 해당합니다.
-fn level_to_value(level: u8) -> u8 {
-    (level.min(7) as u16 * 255 / 7) as u8
+/// 한 쪽 원이 맡은 노트들과 진행 상황입니다. 좌우가 서로 독립적으로 돕니다.
+#[derive(Default)]
+struct SideState {
+    /// 이 쪽이 맡은 노트 시각(초). 오름차순.
+    notes: Vec<f32>,
+    /// 아직 판정되지 않은 첫 노트의 인덱스
+    next: usize,
 }
+
+impl SideState {
+    fn upcoming(&self) -> Option<f32> {
+        self.notes.get(self.next).copied()
+    }
+    fn reset(&mut self) {
+        self.next = 0;
+    }
+}
+
+// --- 진동 일정 --------------------------------------------------------------
+
+/// 한 노트에 대한 `(렌더링 시각, 4비트 코드)` 일정입니다.
+///
+/// **렌더링 시각**은 "손끝이 이때 바뀌었으면" 하는 시점입니다.
+/// 실제 전송 시각은 `value_at` 이 `PRE_SEND_MS` 만큼 앞당겨 계산합니다.
+type Plan = [(f32, u8); 4];
+
+/// 일정과 현재 시각으로 지금 내보낼 코드를 고릅니다.
+///
+/// **켜는 변화는 미리, 끄는 변화는 제시간에** 내보냅니다.
+/// 전송에 67ms 가 걸리므로 켜는 쪽은 그만큼 앞당겨야 제때 손끝에 닿습니다.
+/// 반대로 끄는 쪽을 앞당기면 쳐야 할 순간에 진동이 이미 사라져 버립니다.
+fn value_at(plan: &Plan, now: f32) -> u8 {
+    let pre = PRE_SEND_MS as f32 / 1000.0;
+    let mut code = 0;
+    for &(at, c) in plan {
+        let send_at = if c != 0 { at - pre } else { at };
+        if now >= send_at {
+            code = c;
+        } else {
+            break;
+        }
+    }
+    code
+}
+
+// --- 오디오 동기화 설정 ------------------------------------------------------
 
 /// 재생 중인 음악을 끊기 위해 쓰는 아주 짧은 무음 클립입니다.
-///
-/// audio-service 의 `POST /sound` 핸들러는 새 소리를 재생하기 전에 반드시
-/// `audio_player.clear(PlaybackCategory::SoundEffect)` 를 먼저 호출합니다.
-/// 별도의 정지 API 가 없으므로, 무음을 한 번 재생해서 재생 중인 곡을 비웁니다.
 const SILENCE: &[u8] = include_bytes!("audio/silence.mp3");
 
-/// 음악 재생 요청 ~ 실제 소리가 나기까지의 지연 보정값(ms).
-///
-/// 정적 오디오는 audio-service 로 HTTP 요청을 보낸 뒤 디코딩·리샘플링을 거쳐 재생되므로,
-/// `context.audio.play()` 를 호출한 시점과 실제로 소리가 나는 시점 사이에 지연이 있습니다.
-/// 게임 시계는 호출 시점부터 도므로 그만큼 **게임이 음악보다 앞서갑니다.**
-///
-/// `now_s = 경과시간 + AUDIO_OFFSET_MS/1000` 이므로 부호는 다음과 같습니다.
-/// * **음수** — 게임을 그만큼 늦춥니다. 음악이 늦게 시작되는 보통의 경우에 씁니다.
-/// * **양수** — 게임을 그만큼 당깁니다.
-///
-/// 판정이 곡 내내 일정하게 한쪽으로 쏠릴 때만 이 값으로 맞추세요.
-/// 곡이 진행될수록 점점 어긋난다면 그건 오프셋 문제가 아니라 리샘플링 드리프트입니다.
-/// (`audio-service/src/audio/format.rs` 의 `resample_linear` 참고)
+/// audio-service 의 재생 위치 조회 주소
+const POSITION_URL: &str = "http://127.0.0.1:3005/position";
+/// 재생이 시작되기 전 폴링 주기(ms)
+const SYNC_POLL_MS: u64 = 40;
+/// 재생 시작 후 드리프트 확인 주기(ms)
+const RESYNC_INTERVAL_MS: u64 = 5_000;
+/// 이만큼 어긋났을 때만 다시 맞춥니다(초)
+const RESYNC_THRESHOLD_S: f32 = 0.05;
+/// audio-service 가 응답하지 않을 때 포기하는 시간(ms)
+const SYNC_TIMEOUT_MS: u64 = 5_000;
+/// 게임 시계를 통째로 미는 보정값(ms). 판정이 한쪽으로 쏠릴 때만 씁니다.
 const AUDIO_OFFSET_MS: i64 = 0;
 
-/// 판정 단계 정의. **이 표 하나가 판정에 관한 유일한 기준입니다.**
-///
-/// 각 항목은 `(판정, 허용 오차(초), 점수)` 이며, 오차가 작은 것부터 차례로 검사합니다.
-/// 허용 오차는 노트 시각을 기준으로 앞뒤 양쪽에 적용되지만,
-/// **앞쪽은 예고 시간에서 잘립니다**(`RhythmGame::on_hit`).
-///
-/// 예고가 뜨기 전에 누른 것은 느끼고 친 게 아니라 찍은 것이므로 판정하지 않습니다.
-/// 그래서 실제로 칠 수 있는 구간은 `[T - 예고 - 출력지연, T + 허용치]` 입니다
-/// (`RhythmGame::hit_opens_at`). 지금 설정(예고 200ms, 출력지연 85ms, Good 300ms)
-/// 이라면 -285ms ~ +300ms 입니다. 허용치를 아무리 늘려도 앞쪽은 그 선을 넘지 않습니다.
-///
-/// 단계를 추가·삭제하거나 점수를 바꾸려면 이 표만 고치면 됩니다.
-/// 아래 것들이 전부 여기서 파생됩니다.
-/// * 어떤 판정을 받는지 (`Judge::from_error`)
-/// * 점수 (`Judge::score`)
-/// * 칠 수 있는 한계 시각 (`HIT_WINDOW_S`)
-/// * 정확도 계산 (`RhythmGame::accuracy`)
-///
-/// Miss 는 "표의 어디에도 못 든 경우"라서 표에 넣지 않습니다.
-const HIT_TIERS: [(Judge, f32, u32); 2] = [(Judge::Perfect, 0.3, 100), (Judge::Good, 0.5, 50)];
-
-/// 노트를 칠 수 있는 마지막 경계(초) = 표의 가장 너그러운 허용 오차.
-///
-/// 이 시간을 넘기면 누르든 말든 Miss 입니다. 예전에는 "칠 수 있는 한계(0.22초)"와
-/// "Miss 로 확정하는 시각(0.30초)"이 따로 있어서, 그 사이 80ms 동안 눌러도
-/// 아무 반응이 없는 사각지대가 있었습니다. 지금은 하나로 통일했습니다.
-const HIT_WINDOW_S: f32 = HIT_TIERS[HIT_TIERS.len() - 1].1;
-
-/// 예고 시간을 읽지 못했을 때 사용할 기본값(초)
-const DEFAULT_LEAD_S: f32 = 0.3;
-
-/// 애플릿이 핀 값을 바꾼 뒤 그 진동이 손끝에 닿기까지의 출력 지연(ms).
-///
-/// **진동만 이만큼 미리** 내보냅니다. 판정 시계(`now_s`)는 건드리지 않습니다.
-/// 둘을 같이 밀면 진동을 당긴 만큼 판정도 밀려 아무 의미가 없습니다.
-///
-/// 이 경로는 오디오와 무관해서 `/position` 동기화로는 보정되지 않습니다.
-/// 기기 로그로 확인한 바, 애플릿의 진동 창 자체는 정확히 `[T-예고, T]` 이고
-/// 타격 평균 오차도 -5ms 였습니다. 즉 남은 어긋남은 전부 이 구간에서 생깁니다.
-///
-/// | 구간 | 시간 | 근거 |
-/// |---|---|---|
-/// | UART 전송 (지름 18 원 = 756B) | 66ms | 756 ÷ 11,520B/s |
-/// | PWM 주기 정렬 | 최대 16ms | `PWM_STEP`(16) × `PWM_INTERVAL`(1ms) |
-/// | 합계 | **약 82ms** | |
-///
-/// 여기에 핀이 "떨림"으로 인지되기까지 반송파가 몇 주기 돌아야 하는 몫이 더 붙습니다
-/// (62.5Hz 에서 5주기 ≈ 80ms). 이 부분은 센서 없이는 못 재므로 포함하지 않았습니다.
-///
-/// 그래서 측정·유도 가능한 82ms 를 반올림해 85 로 둡니다.
-/// 이전 값 30ms 는 이 경로를 재지 않고 타격 오차 평균만 보고 넣은 값이라
-/// 실제 지연의 1/3 밖에 못 메웠습니다.
-///
-/// 여전히 늦게 느껴지면 키우고, 앞서 느껴지면 줄이세요.
-const TACTILE_OUTPUT_DELAY_MS: i64 = 68;
-
-/// 진동하는 원의 지름(핀 개수).
-///
-/// 크기 자체도 요구사항이지만, 이 값은 **전체 프레임 전송을 보장하는 역할**도 합니다.
-///
-/// 런타임은 `diff_data.len() * 2 >= 768` 일 때만 전체 프레임(`UpdateDisplay`)을 보내고
-/// (`runtime-native/src/hal/display/braille_display.rs`), 펌웨어는 **그 경로에서만**
-/// `IS_4BIT_MODE` 를 켭니다. 차이 경로는 읽기만 합니다(`firmware/src/bin/main.rs`).
-/// 플래그가 꺼져 있으면 점멸 코드 9~14 가 듀티값 153~238 로 둔갑해,
-/// 점멸 모드가 그냥 센 듀티 모드가 됩니다.
-///
-/// 원이 384핀 이상이면 켜고 끌 때마다 전체 프레임이 나가므로 플래그가 계속 유지됩니다.
-///
-/// | 지름 | 핀 | diff×2 | 전체 프레임 |
-/// |---|---|---|---|
-/// | 18 | 256 | 512 | 아니오 |
-/// | 22 | 384 | 768 | 예 (경계) |
-/// | **24** | **448** | **896** | **예** |
-///
-/// 전송량은 전체 프레임 768B 로, 지름 18 의 차이 전송 756B 와 사실상 같습니다(약 66ms).
-/// 즉 원을 키워서 얻는 안정성이 공짜입니다.
-const VIBRATING_DISC_DIAMETER: i16 = 24;
-
-// --- 오디오 재생 위치 동기화 -------------------------------------------------
-//
-// `context.audio.play()` 는 audio-service 에 재생을 **요청**할 뿐이고,
-// 실제로 첫 샘플이 스피커로 나가기까지는 디코딩·리샘플링 시간만큼 걸립니다.
-// 실측값: CM5 릴리스 빌드 약 180ms, PC 디버그 빌드 약 1,580ms.
-// 요청 시점부터 게임 시계를 돌리면 그만큼 게임이 음악보다 앞서 버립니다.
-//
-// 그래서 audio-service 의 `GET /position` 으로 **실제 재생 위치**를 읽어
-// 게임 시계를 거기에 맞춥니다. 지연이 얼마든, 어떤 기기든 알아서 흡수됩니다.
-
-/// audio-service 의 재생 위치 조회 주소.
-/// 포트 3005 는 `runtime_common::audio::protocol::TTS_SERVICE_DEFAULT_PORT` 와 같은 값인데,
-/// 애플릿(WASM)은 호스트 크레이트에 의존할 수 없어 여기에 복제해 둡니다.
-const POSITION_URL: &str = "http://127.0.0.1:3005/position";
-
-/// 재생이 시작되기를 기다리는 동안의 조회 간격(ms)
-const SYNC_POLL_MS: u64 = 40;
-/// 동기화가 끝난 뒤 어긋남을 확인하는 간격(ms)
-const RESYNC_INTERVAL_MS: u64 = 5_000;
-/// 재확인 시 이 이상 벌어졌을 때만 시계를 다시 맞춥니다.
-const RESYNC_THRESHOLD_S: f32 = 0.05;
-/// 이 시간 안에 재생이 시작되지 않으면 동기화를 포기하고 요청 시점 기준으로 진행합니다.
-/// (audio-service 가 꺼져 있어도 게임이 멈추지 않도록 하는 안전장치)
-const SYNC_TIMEOUT_MS: u64 = 5_000;
-
-/// `GET /position` 응답
 #[derive(Deserialize)]
 struct PositionResponse {
     seconds: f64,
 }
 
-/// 노트 예고 시간을 코드에서 직접 지정합니다.
-///
-/// `None` 이면 채보의 `meta.seconds_per_beat`(현재 0.3초)를 그대로 씁니다.
-/// 예고가 짧을수록 촉각 신호가 날카로워지지만, 그만큼 표현할 수 있는 단계가 줄어듭니다.
-///
-/// | 예고 | 8단계 한 칸 | 비고 |
-/// |---|---|---|
-/// | 300ms | 37.5ms | 채보 기본값 |
-/// | 200ms | 25.0ms | |
-/// | 150ms | 18.8ms | 현재 값 |
-/// | 100ms | 12.5ms | PWM 반송파(16ms)보다 짧아 단계 구분이 어려움 |
-///
-/// `VibrationMode::BlinkPeriod` 는 200ms 아래에서는 제 기능을 못 합니다.
-/// 느린 단계(1·2·4·8Hz)의 한 주기가 각 칸보다 길어서 켜짐/꺼짐이 한 번도 안 일어납니다.
-const LEAD_OVERRIDE_MS: Option<u32> = Some(200);
+/// 예고 시간을 읽지 못했을 때 쓰는 기본값(초)
+const DEFAULT_LEAD_S: f32 = 0.3;
 
-// ---------------------------------------------------------------------------
-// 곡 에셋
-// ---------------------------------------------------------------------------
+// --- 판정 ------------------------------------------------------------------
 
-/// 컴파일 시점에 바이너리에 포함되는 곡 하나의 원본 자료입니다.
+/// 노트 시각과의 오차(초)에 따른 판정과 점수입니다. 반드시 오름차순이어야 합니다.
+///
+/// 앞쪽은 이 허용치가 아니라 **예고 시작 시각**이 정합니다 — 진동이 나가기도 전에
+/// 누른 것은 느끼고 친 게 아니라 찍은 것이므로 판정하지 않습니다
+/// (`TactileRhythm::hit_opens_at`).
+const HIT_TIERS: [(Judge, f32, u32); 2] = [(Judge::Perfect, 0.3, 100), (Judge::Good, 0.5, 50)];
+
+/// 노트를 칠 수 있는 마지막 경계(초) = 표의 가장 너그러운 허용 오차.
+const HIT_WINDOW_S: f32 = HIT_TIERS[HIT_TIERS.len() - 1].1;
+
+// --- 곡 --------------------------------------------------------------------
+
 struct SongAsset {
     /// [ko, en, ja] 순서의 곡 제목
     title: [&'static str; 3],
@@ -350,17 +385,21 @@ struct SongAsset {
 }
 
 /// 곡을 추가하려면 `src/audio/` 에 mp3 + json 을 넣고 여기에 한 줄 추가하면 됩니다.
-const SONG_ASSETS: &[SongAsset] = &[SongAsset {
-    title: ["꼬마 눈사람", "Little Snowman", "小さな雪だるま"],
-    chart_json: include_str!("audio/little_snowman.json"),
-    audio: include_bytes!("audio/little_snowman.mp3"),
-}];
-
-// --- 채보 JSON 스키마 -------------------------------------------------------
+const SONG_ASSETS: &[SongAsset] = &[
+    SongAsset {
+        title: ["꼬마 눈사람", "Little Snowman", "小さな雪だるま"],
+        chart_json: include_str!("audio/little_snowman.json"),
+        audio: include_bytes!("audio/little_snowman.mp3"),
+    },
+    SongAsset {
+        title: ["작별", "Old Long Syne", "過ぎ去った日々"],
+        chart_json: include_str!("audio/old_long_since.json"),
+        audio: include_bytes!("audio/old_long_since.mp3"),
+    },
+];
 
 #[derive(Deserialize, Default)]
 struct ChartMeta {
-    /// 예고 시간(초). 이 값만큼 **노트 시각 이전부터** 진동이 시작됩니다.
     #[serde(default)]
     seconds_per_beat: f32,
 }
@@ -368,6 +407,9 @@ struct ChartMeta {
 #[derive(Deserialize)]
 struct ChartNote {
     time: f32,
+    /// 1 = 왼쪽, 2 = 오른쪽. 채보가 한 레인뿐이면 무시하고 번갈아 배정합니다.
+    #[serde(default)]
+    lane: u8,
 }
 
 #[derive(Deserialize)]
@@ -378,15 +420,18 @@ struct ChartFile {
     notes: Vec<ChartNote>,
 }
 
-/// 파싱이 끝난, 게임이 실제로 사용하는 곡 정보입니다.
+/// 파싱이 끝난, 애플릿이 실제로 사용하는 곡 정보입니다.
 struct Song {
     title: [&'static str; 3],
     audio: &'static [u8],
-    /// 예고 시간(초)
+    /// 채보가 알려 준 예고 시간(초). 지금은 `CUE_MS` 가 우선합니다.
+    #[allow(dead_code)]
     lead: f32,
-    /// 노트 시각(초). 오름차순으로 정렬되어 있습니다.
-    notes: Vec<f32>,
-    /// mp3 헤더에서 계산한 실제 재생 길이(초). 파싱에 실패하면 `None`.
+    /// 왼쪽 원이 맡은 노트 시각(초)
+    left_notes: Vec<f32>,
+    /// 오른쪽 원이 맡은 노트 시각(초)
+    right_notes: Vec<f32>,
+    /// mp3 헤더에서 계산한 실제 재생 길이(초)
     audio_secs: Option<f32>,
 }
 
@@ -399,21 +444,72 @@ impl Song {
         }
     }
 
-    /// 결과 화면으로 넘어가는 시각(초)입니다.
-    ///
-    /// **음악을 중간에 끊지 않고 끝까지 들려준 뒤** 결과를 알려 주기 위해,
-    /// mp3 의 실제 재생 길이를 기준으로 삼습니다.
-    /// 헤더를 읽지 못했을 때만 마지막 노트 + 여유 시간으로 대체합니다.
-    /// 진행 막대의 기준 길이이기도 합니다.
+    /// 결과 화면으로 넘어가는 시각(초). 음악을 끝까지 들려준 뒤에 넘어갑니다.
     fn end_secs(&self) -> f32 {
-        let after_last_note = self.notes.last().copied().unwrap_or(0.0) + HIT_WINDOW_S;
+        let last = self
+            .left_notes
+            .last()
+            .copied()
+            .unwrap_or(0.0)
+            .max(self.right_notes.last().copied().unwrap_or(0.0));
+        let after_last_note = last + HIT_WINDOW_S;
         match self.audio_secs {
-            // 채보가 음원보다 길게 잡혀 있어도 마지막 노트 판정은 끝내고 넘어갑니다.
             Some(secs) => secs.max(after_last_note),
             None => after_last_note + 2.0,
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Judge {
+    Perfect,
+    Good,
+    Miss,
+}
+
+impl Judge {
+    /// 노트 시각과의 오차(초, 절댓값)로 판정을 결정합니다.
+    /// 어느 단계에도 못 들면 `None` — 헛손질이라 판정 자체를 하지 않습니다.
+    fn from_error(error_secs: f32) -> Option<Judge> {
+        HIT_TIERS
+            .iter()
+            .find(|(_, tolerance, _)| error_secs <= *tolerance)
+            .map(|(judge, _, _)| *judge)
+    }
+
+    /// 이 판정을 받기 위한 최대 오차(초). Miss 는 경계가 없으므로 `None`.
+    /// 게임 로직은 `from_error` 만 쓰므로, 표를 검증하는 테스트에서만 필요합니다.
+    #[cfg(test)]
+    fn tolerance(self) -> Option<f32> {
+        HIT_TIERS
+            .iter()
+            .find(|(judge, _, _)| *judge == self)
+            .map(|(_, tolerance, _)| *tolerance)
+    }
+
+    fn score(self) -> u32 {
+        HIT_TIERS
+            .iter()
+            .find(|(judge, _, _)| *judge == self)
+            .map(|(_, _, score)| *score)
+            .unwrap_or(0)
+    }
+
+    /// 콤보가 이어지는 판정인지 여부입니다.
+    fn keeps_combo(self) -> bool {
+        self != Judge::Miss
+    }
+
+    /// 가장 좋은 판정의 점수. 정확도 계산의 분모로 씁니다.
+    fn best_score() -> u32 {
+        HIT_TIERS
+            .iter()
+            .map(|(_, _, score)| *score)
+            .max()
+            .unwrap_or(1)
+    }
+}
+
 
 /// MP3 프레임 헤더를 훑어 실제 재생 길이(초)를 계산합니다.
 ///
@@ -498,6 +594,13 @@ fn mp3_duration_secs(data: &[u8]) -> Option<f32> {
 }
 
 /// 채보 JSON 을 파싱합니다. 단일 레인 게임이므로 `lane` 필드는 사용하지 않습니다.
+
+
+/// 채보를 읽어 노트를 좌우로 나눕니다.
+///
+/// 채보에 `lane` 이 둘 이상 있으면 그대로 따릅니다(작은 번호가 왼쪽).
+/// 한 레인뿐인 채보(지금 `little_snowman.json` 이 그렇습니다)는 **번갈아** 배정해
+/// 2키 모드가 실제로 양손을 쓰게 만듭니다.
 fn load_songs() -> Vec<Song> {
     SONG_ASSETS
         .iter()
@@ -507,30 +610,40 @@ fn load_songs() -> Vec<Song> {
                     let lead = if chart.meta.seconds_per_beat > 0.0 {
                         chart.meta.seconds_per_beat
                     } else {
-                        log::warn!(
-                            "{}: seconds_per_beat 가 없어 기본값 {}초를 사용합니다.",
-                            asset.title[1],
-                            DEFAULT_LEAD_S
-                        );
                         DEFAULT_LEAD_S
                     };
 
-                    let mut notes: Vec<f32> = chart.notes.iter().map(|n| n.time).collect();
-                    notes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let mut notes: Vec<(f32, u8)> =
+                        chart.notes.iter().map(|n| (n.time, n.lane)).collect();
+                    notes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-                    let audio_secs = mp3_duration_secs(asset.audio);
-                    if audio_secs.is_none() {
-                        log::warn!(
-                            "{}: mp3 길이를 읽지 못했습니다. 마지막 노트 기준으로 종료합니다.",
-                            asset.title[1]
-                        );
+                    let mut lanes: Vec<u8> = notes.iter().map(|(_, l)| *l).collect();
+                    lanes.sort_unstable();
+                    lanes.dedup();
+                    let multi_lane = lanes.len() >= 2;
+
+                    let (mut left, mut right) = (Vec::new(), Vec::new());
+                    for (i, (time, lane)) in notes.iter().enumerate() {
+                        let to_left = if multi_lane {
+                            *lane == lanes[0]
+                        } else {
+                            i % 2 == 0
+                        };
+                        if to_left {
+                            left.push(*time);
+                        } else {
+                            right.push(*time);
+                        }
                     }
 
+                    let audio_secs = mp3_duration_secs(asset.audio);
                     log::info!(
-                        "{}: 노트 {}개, 예고 {}초, 음원 {:?}초",
+                        "{}: 노트 {}개 (왼쪽 {} / 오른쪽 {}), 배정 {}, 음원 {:?}초",
                         asset.title[1],
                         notes.len(),
-                        lead,
+                        left.len(),
+                        right.len(),
+                        if multi_lane { "채보 lane" } else { "번갈아" },
                         audio_secs
                     );
 
@@ -538,7 +651,8 @@ fn load_songs() -> Vec<Song> {
                         title: asset.title,
                         audio: asset.audio,
                         lead,
-                        notes,
+                        left_notes: left,
+                        right_notes: right,
                         audio_secs,
                     })
                 }
@@ -552,104 +666,71 @@ fn load_songs() -> Vec<Song> {
 }
 
 // ---------------------------------------------------------------------------
-// 게임 상태
+// 애플릿 상태
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Judge {
-    Perfect,
-    Good,
-    Miss,
-}
-
-impl Judge {
-    /// 노트 시각과의 오차(초, 절댓값)로 판정을 결정합니다.
-    /// 어느 단계에도 못 들면 `None` — 헛손질이라 판정 자체를 하지 않습니다.
-    fn from_error(error_secs: f32) -> Option<Judge> {
-        HIT_TIERS
-            .iter()
-            .find(|(_, tolerance, _)| error_secs <= *tolerance)
-            .map(|(judge, _, _)| *judge)
-    }
-
-    /// 이 판정을 받기 위한 최대 오차(초). Miss 는 경계가 없으므로 `None`.
-    /// 게임 로직은 `from_error` 만 쓰므로, 표를 검증하는 테스트에서만 필요합니다.
-    #[cfg(test)]
-    fn tolerance(self) -> Option<f32> {
-        HIT_TIERS
-            .iter()
-            .find(|(judge, _, _)| *judge == self)
-            .map(|(_, tolerance, _)| *tolerance)
-    }
-
-    fn score(self) -> u32 {
-        HIT_TIERS
-            .iter()
-            .find(|(judge, _, _)| *judge == self)
-            .map(|(_, _, score)| *score)
-            .unwrap_or(0)
-    }
-
-    /// 콤보가 이어지는 판정인지 여부입니다.
-    fn keeps_combo(self) -> bool {
-        self != Judge::Miss
-    }
-
-    /// 판정 직후 화면 맨 윗줄에 그릴 막대의 가로 비율입니다.
-    /// 소리를 못 듣는 상황에서도 방금 판정을 눈으로 구분할 수 있게 합니다.
-    fn flash_ratio(self) -> f32 {
-        match self {
-            Judge::Perfect => 1.0,
-            Judge::Good => 0.5,
-            Judge::Miss => 1.0 / 6.0,
-        }
-    }
-
-    /// 가장 좋은 판정의 점수. 정확도 계산의 분모로 씁니다.
-    fn best_score() -> u32 {
-        HIT_TIERS
-            .iter()
-            .map(|(_, _, score)| *score)
-            .max()
-            .unwrap_or(1)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GameState {
-    /// 곡 선택 화면
-    SongSelect,
+    /// 대기 화면 — 곡·모드·프리셋을 여기서만 바꿉니다.
+    Standby,
+    /// 시작 직전 카운트다운 — `COUNTDOWN` 을 한 칸씩 읽습니다.
+    Countdown,
     /// 연주 중
     Playing,
     /// 결과 화면
     Result,
 }
 
-/// 한 프레임에 실제로 그려질 내용입니다.
-/// 이전 프레임과 비교해서 달라졌을 때만 다시 그리므로, 90fps 로 매번 갱신하지 않습니다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct Visual {
-    /// 원 내부를 채울 강도. `Intensity::OFF` 면 테두리만 그립니다.
-    fill: Intensity,
-    /// 진행 막대의 길이(픽셀)
-    progress_px: i16,
-    /// 판정 직후 잠깐 켜지는 표시
-    flash: bool,
+/// 카운트다운 한 틱의 결과.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CountdownStep {
+    /// 이번 칸에 들어섰으니 이 문구를 읽어야 합니다.
+    Speak(&'static str),
+    /// 아직 같은 칸 안입니다. 할 일 없음.
+    Wait,
+    /// 다 셌습니다. 연주를 시작하세요.
+    Done,
 }
 
-pub struct RhythmGame {
+/// 한 프레임에 실제로 그려질 내용. 달라졌을 때만 다시 그립니다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Visual {
+    /// 왼쪽 원에 내보낼 4비트 코드
+    left: u8,
+    /// 오른쪽 원에 내보낼 4비트 코드
+    right: u8,
+}
+
+pub struct TactileRhythm {
     songs: Vec<Song>,
     selected: usize,
     state: GameState,
-    /// 기능 키로 실시간 전환되는 진동 방식
-    vibration_mode: VibrationMode,
+
+    /// 연주 방식 (대기 화면에서만 전환)
+    play_mode: PlayMode,
+    /// 리듬게임 프리셋 인덱스
+    preset_rhythm: usize,
+    /// 감상 프리셋 인덱스
+    preset_listen: usize,
+
+    left: SideState,
+    right: SideState,
 
     /// 곡 재생을 시작한 모노토닉 시각
     started_at: Duration,
     /// 곡 시작 기준 현재 시간(초)
     now_s: f32,
-    /// 아직 판정되지 않은 첫 노트의 인덱스
-    next_note: usize,
+    /// 대기 화면 미리듣기로 보낸 요청 id. 응답을 버리려고 들고 있습니다.
+    preview_request: Option<u32>,
+
+    /// 카운트다운을 시작한 모노토닉 시각
+    countdown_at: Duration,
+    /// 카운트다운에서 이미 읽은 칸 수
+    countdown_spoken: u8,
+
+    /// 모노토닉 시각(초). 곡과 무관하게 계속 흐릅니다.
+    /// 대기 화면의 진동 미리보기가 이 시계로 돕니다.
+    wall_s: f32,
 
     visual: Visual,
 
@@ -659,48 +740,35 @@ pub struct RhythmGame {
     perfect: u32,
     good: u32,
     miss: u32,
-    last_judge: Option<Judge>,
-    /// 판정 표시를 언제까지 유지할지(곡 기준 초)
-    flash_until_s: f32,
 
-    /// 판정된 입력들의 **부호 있는** 타이밍 오차 합(초). 양수 = 게임 시계 기준 늦게 누름.
-    /// 남은 오차를 로그로 확인할 때 씁니다.
+    /// 판정된 입력들의 부호 있는 타이밍 오차 합(초). 양수 = 늦게 누름.
     timing_error_sum: f32,
-    /// 위 합에 포함된 입력 개수 (Miss 는 오차를 정의할 수 없어 제외)
     timing_error_count: u32,
 
-    /// 진행 중인 `/position` 요청 id
     sync_pending: Option<u32>,
-    /// 마지막으로 `/position` 을 요청한 모노토닉 시각 (조회 주기 제어용)
     sync_last_poll: Duration,
-    /// 현재 진행 중인 `/position` 요청을 **보낸** 시각.
-    /// 서버가 위치를 읽은 시점이 이 값에 가까우므로, 시계를 맞출 때의 기준으로 씁니다.
     sync_request_at: Duration,
-    /// 게임 시계를 실제 재생 위치에 맞추는 데 성공했는지 여부.
-    /// `false` 인 동안에는 시계를 0 에 묶어 두고 판정도 하지 않습니다.
     sync_locked: bool,
-
-    /// 계측용: 직전 프레임의 진동 세기. 꺼짐→켜짐 전환을 잡아내는 데 씁니다.
-    /// 진동 단계 = 하드웨어 레벨 (1~7). A/D 키로 조절합니다.
-    vibration_level: u8,
-
-    probe_prev_fill: u8,
-    /// 계측용: 이번 노트의 진동이 처음 켜진 `now_s`.
-    probe_onset_s: Option<f32>,
-    /// 재생을 요청한 모노토닉 시각 (동기화 타임아웃 판정용)
     play_requested_at: Duration,
 }
 
-impl Default for RhythmGame {
+impl Default for TactileRhythm {
     fn default() -> Self {
         Self {
             songs: Vec::new(),
             selected: 0,
-            state: GameState::SongSelect,
-            vibration_mode: DEFAULT_VIBRATION_MODE,
+            state: GameState::Standby,
+            play_mode: PlayMode::Rhythm,
+            preset_rhythm: 0,
+            preset_listen: 0,
+            left: SideState::default(),
+            right: SideState::default(),
             started_at: Duration::ZERO,
             now_s: 0.0,
-            next_note: 0,
+            preview_request: None,
+            countdown_at: Duration::ZERO,
+            countdown_spoken: 0,
+            wall_s: 0.0,
             visual: Visual::default(),
             score: 0,
             combo: 0,
@@ -708,41 +776,132 @@ impl Default for RhythmGame {
             perfect: 0,
             good: 0,
             miss: 0,
-            last_judge: None,
-            flash_until_s: 0.0,
             timing_error_sum: 0.0,
             timing_error_count: 0,
             sync_pending: None,
             sync_last_poll: Duration::ZERO,
             sync_request_at: Duration::ZERO,
             sync_locked: false,
-            vibration_level: DEFAULT_VIBRATION_LEVEL,
-            probe_prev_fill: 0,
-            probe_onset_s: None,
             play_requested_at: Duration::ZERO,
         }
     }
 }
 
-impl RhythmGame {
+impl TactileRhythm {
     fn song(&self) -> Option<&Song> {
         self.songs.get(self.selected)
     }
 
-    /// 실제로 적용되는 예고 시간(초)입니다.
-    /// `LEAD_OVERRIDE_MS` 가 설정되어 있으면 채보 값보다 우선합니다.
-    fn lead(&self) -> f32 {
-        match LEAD_OVERRIDE_MS {
-            Some(ms) => ms as f32 / 1000.0,
-            None => self.song().map(|s| s.lead).unwrap_or(DEFAULT_LEAD_S),
+    fn side(&self, side: Side) -> &SideState {
+        match side {
+            Side::Left => &self.left,
+            Side::Right => &self.right,
         }
     }
 
-    /// 아직 치지 않은 다음 노트의 시각(초)
-    fn upcoming_note(&self) -> Option<f32> {
-        self.song()
-            .and_then(|s| s.notes.get(self.next_note))
-            .copied()
+    fn side_mut(&mut self, side: Side) -> &mut SideState {
+        match side {
+            Side::Left => &mut self.left,
+            Side::Right => &mut self.right,
+        }
+    }
+
+    /// 예고 시간(초). 두 모드가 같은 값을 쓰지만 의미가 다릅니다.
+    /// * 리듬게임 — `[t - cue, t]`
+    /// * 감상 — `[t - cue/2, t + cue/2]`
+    fn cue_s(&self) -> f32 {
+        CUE_MS as f32 / 1000.0
+    }
+
+    /// 지금 고른 프리셋을 코드 배열로 돌려줍니다.
+    fn preset(&self) -> [u8; 3] {
+        match self.play_mode {
+            PlayMode::Rhythm => {
+                let p = RHYTHM_PRESETS[self.preset_rhythm.min(RHYTHM_PRESETS.len() - 1)];
+                [p[0], p[1], p[2]]
+            }
+            PlayMode::Listen => {
+                let p = LISTEN_PRESETS[self.preset_listen.min(LISTEN_PRESETS.len() - 1)];
+                [p[0], p[1], 0]
+            }
+        }
+    }
+
+    fn preset_index(&self) -> usize {
+        match self.play_mode {
+            PlayMode::Rhythm => self.preset_rhythm,
+            PlayMode::Listen => self.preset_listen,
+        }
+    }
+
+    /// 한 노트에 대한 진동 일정을 만듭니다. `(렌더링 시각, 4비트 코드)` 오름차순.
+    fn plan_for(&self, t: f32) -> Plan {
+        let cue = self.cue_s();
+        let p = self.preset();
+        match self.play_mode {
+            // 예고를 절반으로 갈라 2단계, 그 뒤 HOLDING, 최대 시간이 지나면 꺼짐.
+            PlayMode::Rhythm => [
+                (t - cue, p[0]),
+                (t - cue / 2.0, p[1]),
+                (t, p[2]),
+                (t + HOLD_MAX_MS as f32 / 1000.0, 0),
+            ],
+            // 노트 시각을 한가운데 두고 전후 절반씩. HOLDING 없음.
+            PlayMode::Listen => [
+                (t - cue / 2.0, p[0]),
+                (t, p[1]),
+                (t + cue / 2.0, 0),
+                (t + cue / 2.0, 0),
+            ],
+        }
+    }
+
+    /// 이 쪽 원이 지금 내보낼 4비트 코드입니다.
+    fn code_for(&self, side: Side) -> u8 {
+        if self.state != GameState::Playing || !self.sync_locked {
+            return 0;
+        }
+        let Some(t) = self.side(side).upcoming() else {
+            return 0;
+        };
+        value_at(&self.plan_for(t), self.now_s)
+    }
+
+    /// 이 노트를 칠 수 있게 되는 가장 이른 시각 = **진동이 나가기 시작하는 시점**.
+    ///
+    /// 허용치(`HIT_TIERS`)가 예고보다 길어도 이 선보다 앞서 누른 것은 판정하지 않습니다.
+    /// 아직 아무 신호도 못 느낀 상태이므로 맞춘 게 아니라 찍은 것입니다.
+    fn hit_opens_at(&self, target: f32) -> f32 {
+        self.plan_for(target)[0].0 - PRE_SEND_MS as f32 / 1000.0
+    }
+
+    /// 대기 화면에서 가운데 키를 눌렀을 때. 카운트다운을 시작합니다.
+    ///
+    /// 음악은 카운트다운이 끝난 뒤에야 `start_song` 에서 시작됩니다.
+    fn begin_countdown(&mut self, now: Duration) {
+        if self.songs.is_empty() {
+            return;
+        }
+        self.state = GameState::Countdown;
+        self.countdown_at = now;
+        self.countdown_spoken = 0;
+    }
+
+    /// 카운트다운을 한 틱 진행합니다. 시계를 인자로 받아 테스트에서 돌려볼 수 있게 했습니다.
+    ///
+    /// 칸 경계를 넘을 때마다 `Speak` 를 한 번씩만 돌려줍니다.
+    fn countdown_tick(&mut self, now: Duration) -> CountdownStep {
+        let elapsed_ms = now.saturating_sub(self.countdown_at).as_millis() as u64;
+        let idx = (elapsed_ms / COUNTDOWN_STEP_MS) as usize;
+
+        if idx >= COUNTDOWN.len() {
+            return CountdownStep::Done;
+        }
+        if self.countdown_spoken as usize <= idx {
+            self.countdown_spoken = idx as u8 + 1;
+            return CountdownStep::Speak(COUNTDOWN[idx]);
+        }
+        CountdownStep::Wait
     }
 
     fn start_song(&mut self, context: &mut Context, now: Duration) {
@@ -750,41 +909,76 @@ impl RhythmGame {
             return;
         };
         let audio = song.audio;
-        let note_count = song.notes.len();
+        self.left.notes = song.left_notes.clone();
+        self.right.notes = song.right_notes.clone();
 
-        // 음악 재생을 먼저 요청하고, 그 시점을 곡의 0초로 잡습니다.
-        context.audio.play(audio);
+        Self::post_sound(context, audio, MUSIC_VOLUME);
 
         self.started_at = now;
+        self.play_requested_at = now;
+        self.sync_request_at = now;
+        self.sync_last_poll = Duration::ZERO;
+        self.sync_pending = None;
+        self.sync_locked = false;
         self.now_s = 0.0;
-        self.next_note = 0;
+
+        self.left.reset();
+        self.right.reset();
         self.score = 0;
         self.combo = 0;
         self.max_combo = 0;
         self.perfect = 0;
         self.good = 0;
         self.miss = 0;
-        self.last_judge = None;
-        self.flash_until_s = 0.0;
         self.timing_error_sum = 0.0;
         self.timing_error_count = 0;
-        self.sync_pending = None;
-        self.sync_last_poll = Duration::ZERO;
-        self.sync_request_at = Duration::ZERO;
-        self.sync_locked = false;
-        self.play_requested_at = now;
         self.state = GameState::Playing;
 
-        log::info!("연주 시작: 노트 {}개, 예고 {}초", note_count, self.lead());
+        log::info!(
+            "연주 시작: {:?}, 프리셋 {:?}, 예고 {}ms",
+            self.play_mode,
+            self.preset(),
+            CUE_MS
+        );
     }
 
-    /// 재생 중인 음악을 멈춥니다.
+    /// 소리를 보낼 주소. 트랙 음량을 질의 문자열로 싣습니다.
     ///
-    /// SDK 에는 정지 API 가 없지만, audio-service 의 `/sound` 핸들러가 새 소리를 재생하기 전에
-    /// 효과음 트랙을 먼저 비우기 때문에, 짧은 무음을 흘려보내면 곡이 끊깁니다.
+    /// audio-service 의 `SoundQuery { volume: f32 }` 가 받습니다.
+    /// 값이 없으면 서버 기본값 1.0 이 됩니다.
+    fn sound_url(volume: f32) -> String {
+        format!("{SOUND_URL}?volume={volume}")
+    }
+
+    /// audio-service 에 소리를 직접 보냅니다. 성공하면 요청 id 를 돌려줍니다.
+    fn post_sound(context: &mut Context, data: &'static [u8], volume: f32) -> Option<u32> {
+        let url = Self::sound_url(volume);
+        match context.http.fetch_async("POST", &url, &[], data) {
+            Ok(id) => Some(id),
+            Err(code) => {
+                log::warn!("소리 재생 요청 실패 (코드 {code}, 음량 {volume})");
+                None
+            }
+        }
+    }
+
+    /// 대기 화면에서 지금 고른 곡을 **작게** 틀어 줍니다.
+    ///
+    /// `context.audio.play()` 는 시스템 음량을 그대로 쓰므로 쓸 수 없습니다.
+    /// audio-service 의 `POST /sound?volume=` 가 재생마다 음량을 받으니 직접 보냅니다.
+    /// `/sound` 는 새 소리를 틀기 전에 효과음 트랙을 비우므로, 곡을 연달아 넘겨도
+    /// 앞 미리듣기가 겹치지 않습니다.
+    fn play_preview(&mut self, context: &mut Context) {
+        let Some(song) = self.songs.get(self.selected) else {
+            return;
+        };
+        let audio = song.audio;
+        self.preview_request = Self::post_sound(context, audio, PREVIEW_VOLUME);
+    }
+
     fn stop_music(&self, context: &mut Context) {
-        context.audio.play(SILENCE);
-        log::debug!("음악 정지 요청");
+        // `/sound` 는 새 소리 전에 효과음 트랙을 비우므로, 무음을 한 번 틀면 멈춥니다.
+        Self::post_sound(context, SILENCE, MUSIC_VOLUME);
     }
 
     fn apply_judge(&mut self, judge: Judge) {
@@ -795,81 +989,144 @@ impl RhythmGame {
         }
         if judge.keeps_combo() {
             self.combo += 1;
+            self.max_combo = self.max_combo.max(self.combo);
         } else {
             self.combo = 0;
         }
-        self.max_combo = self.max_combo.max(self.combo);
         self.score += judge.score();
-        self.last_judge = Some(judge);
-        self.flash_until_s = self.now_s + 0.2;
-
-        log::debug!(
-            "{:?} @ {:.3}s (score={}, combo={})",
-            judge,
-            self.now_s,
-            self.score,
-            self.combo
-        );
     }
 
-    /// 가운데 키를 눌렀을 때의 판정입니다.
-    /// 이 노트를 칠 수 있게 되는 가장 이른 시각(게임 시계).
-    ///
-    /// **애플릿이 진동을 내보내기 시작하는 바로 그 시점**입니다.
-    /// `vibration_fill_with` 가 `cue_now = now_s + 출력지연` 으로 창을 여므로,
-    /// 판정 시계 기준으로는 `T - 예고 - 출력지연` 부터 핀이 올라갑니다.
-    ///
-    /// 출력 지연까지 빼 두는 이유는, 실제 물리 지연이 `TACTILE_OUTPUT_DELAY_MS`
-    /// 보다 작으면 진동이 `T - 예고` 보다 **일찍** 손끝에 닿기 때문입니다.
-    /// 그때 누른 건 정당하게 느끼고 친 것이므로 거절하면 안 됩니다.
-    /// 즉 이 경계는 "느꼈을 가능성이 있는 가장 이른 시각"입니다.
-    ///
-    /// 그래서 칠 수 있는 구간은 `[T - 예고 - 출력지연, T + 허용치]` 입니다.
-    fn hit_opens_at(&self, target: f32) -> f32 {
-        target - self.lead() - TACTILE_OUTPUT_DELAY_MS as f32 / 1000.0
-    }
-
-    fn on_hit(&mut self) {
-        let Some(target) = self.upcoming_note() else {
+    /// 한 쪽 원의 타격을 처리합니다. 좌우가 서로 독립적입니다.
+    fn on_hit(&mut self, side: Side) {
+        if self.state != GameState::Playing || self.play_mode != PlayMode::Rhythm {
+            return;
+        }
+        let Some(target) = self.side(side).upcoming() else {
             return;
         };
 
-        // 부호 있는 오차: 양수면 게임 시계 기준으로 늦게 누른 것입니다.
-        let signed_error = self.now_s - target;
-
-        // **예고가 나가기도 전에 누른 것은 아예 없던 일로 칩니다.**
-        //
-        // 판정 허용치(`HIT_TIERS`)가 예고보다 길면, 예고가 뜨기도 전에 눌러도
-        // 판정이 붙어 버립니다. 지금 설정이 그렇습니다 — 예고 200ms 에 Good 300ms 라
-        // `T - 250ms` 에 누르면 아직 아무 신호도 못 느낀 상태인데 Good 이 됩니다.
-        // 그건 맞춘 게 아니라 찍은 것이므로 판정 자체를 하지 않습니다.
-        //
-        // 경계는 `hit_opens_at` 이 정합니다. 허용치를 아무리 늘려도 앞쪽은
-        // 그 선을 넘지 않습니다.
-        //
-        // 무시이지 미스가 아닙니다. 노트를 소비하지도, 콤보를 끊지도 않습니다 —
-        // 예고를 못 느낀 상태의 헛손질로 벌을 주면 억울하니까요.
+        // 진동이 나가기도 전에 누른 것은 아예 없던 일로 칩니다.
+        // 노트를 소비하지도, 콤보를 끊지도 않습니다.
         if self.now_s < self.hit_opens_at(target) {
             return;
         }
 
+        let signed_error = self.now_s - target;
         let Some(judge) = Judge::from_error(signed_error.abs()) else {
-            // 이미 놓친 노트 — 헛손질은 감점 없이 무시합니다.
             return;
         };
 
         self.timing_error_sum += signed_error;
         self.timing_error_count += 1;
-
-        self.next_note += 1;
+        self.side_mut(side).next += 1;
         self.apply_judge(judge);
     }
 
-    /// audio-service 의 `GET /position` 을 폴링해 게임 시계를 실제 재생 위치에 맞춥니다.
+    /// 지나간 노트를 정리합니다.
     ///
-    /// 재생이 시작되기 전에는 `/position` 이 0 을 돌려주므로, 0 보다 커지는 순간이
-    /// 곧 "음악이 실제로 흘러나오기 시작한 시점"입니다. 그때 `started_at` 을
-    /// `지금 - 재생위치` 로 잡으면 디코딩 지연이 얼마였든 정확히 흡수됩니다.
+    /// 리듬게임은 허용치를 넘기면 Miss, 감상 모드는 진동 창이 끝나면 조용히 넘깁니다.
+    fn reap_notes(&mut self) {
+        let cue = self.cue_s();
+        for side in [Side::Left, Side::Right] {
+            loop {
+                let Some(t) = self.side(side).upcoming() else {
+                    break;
+                };
+                match self.play_mode {
+                    PlayMode::Rhythm => {
+                        if self.now_s - t <= HIT_WINDOW_S {
+                            break;
+                        }
+                        self.side_mut(side).next += 1;
+                        self.apply_judge(Judge::Miss);
+                    }
+                    PlayMode::Listen => {
+                        if self.now_s <= t + cue / 2.0 {
+                            break;
+                        }
+                        self.side_mut(side).next += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    fn is_finished(&self) -> bool {
+        match self.song() {
+            Some(song) => self.now_s >= song.end_secs(),
+            None => true,
+        }
+    }
+
+    /// 대기 화면에서 두 원에 내보낼 코드입니다.
+    ///
+    /// `STANDBY_PAUSE_MS` 만큼 쉬고 → 예고 패턴(1단계 → 2단계)을 한 번 보여 주고 →
+    /// 다시 쉬기를 반복합니다. 쉼 없이 이어 붙이면 패턴이 아니라 그냥 계속
+    /// 윙윙대는 느낌이 되어 두 단계가 구분되지 않습니다.
+    ///
+    /// 계산은 연주 중과 **같은 경로**(`plan_for` 와 같은 모양의 일정 + `value_at`)를
+    /// 탑니다. 그래서 `PRE_SEND_MS` 도 똑같이 적용되고, 여기서 느끼는 것이
+    /// 실제 노트에서 느낄 것과 같습니다.
+    ///
+    /// HOLDING 은 타격에 딸린 것이라 일정에서 빼고 노트 시각에 바로 끕니다.
+    fn standby_visual(&self) -> Visual {
+        let cue = self.cue_s();
+        let pause = STANDBY_PAUSE_MS as f32 / 1000.0;
+        let cycle = pause + cue;
+        if cycle <= 0.0 {
+            return Visual::default();
+        }
+
+        // 이번 주기의 가상 노트 시각. 쉬는 시간 뒤에 예고가 꼬박 들어가는 지점입니다.
+        let t = cycle;
+        let p = self.preset();
+        let plan: Plan = [
+            (t - cue, p[0]),
+            (t - cue / 2.0, p[1]),
+            (t, 0),
+            (t, 0),
+        ];
+
+        let code = value_at(&plan, self.wall_s % cycle);
+        Visual {
+            left: code,
+            right: code,
+        }
+    }
+
+    fn compute_visual(&self) -> Visual {
+        match self.state {
+            GameState::Playing => Visual {
+                left: self.code_for(Side::Left),
+                right: self.code_for(Side::Right),
+            },
+            GameState::Standby => self.standby_visual(),
+            GameState::Countdown | GameState::Result => Visual::default(),
+        }
+    }
+
+    fn mean_timing_error_ms(&self) -> Option<i32> {
+        if self.timing_error_count == 0 {
+            return None;
+        }
+        Some((self.timing_error_sum / self.timing_error_count as f32 * 1000.0).round() as i32)
+    }
+
+    fn accuracy(&self) -> f32 {
+        let judged = self.perfect + self.good + self.miss;
+        if judged == 0 {
+            return 0.0;
+        }
+        self.score as f32 / (judged * Judge::best_score()) as f32 * 100.0
+    }
+
+    /// 모드·프리셋·곡을 바꾸고 음성으로 알려 줍니다. 대기 화면에서만 호출됩니다.
+    fn announce(&self, context: &mut Context, text: String) {
+        context
+            .audio
+            .speak_text_with_option(&text, SpeechOption::forced());
+    }
+
     fn poll_audio_sync(&mut self, context: &mut Context, now: Duration) {
         // 1) 도착한 응답 처리
         if let Some(id) = self.sync_pending
@@ -940,233 +1197,27 @@ impl RhythmGame {
         }
     }
 
-    /// 결과 화면으로 넘어갈 때가 되었는지 판단합니다.
-    ///
-    /// 마지막 노트를 판정했더라도 **음악이 끝날 때까지 기다립니다.**
-    /// 곡을 중간에 잘라내지 않고 끝까지 들려준 뒤 결과를 알려 주기 위해서입니다.
-    fn is_finished(&self) -> bool {
-        self.song()
-            .map(|s| self.next_note >= s.notes.len() && self.now_s >= s.end_secs())
-            .unwrap_or(true)
-    }
-
-    /// 판정 시간을 넘긴 노트를 Miss 처리합니다.
-    fn reap_missed_notes(&mut self) {
-        while let Some(target) = self.upcoming_note() {
-            if self.now_s - target <= HIT_WINDOW_S {
-                break;
-            }
-            self.next_note += 1;
-            self.apply_judge(Judge::Miss);
-        }
-    }
-
-    /// 현재 시각에서 원을 어떤 강도로 채울지 계산합니다.
-    ///
-    /// 예고 구간은 정확히 `[T - lead, T]` 입니다. 노트 시각에 최고조에 도달한 뒤 바로 꺼집니다.
-    fn vibration_fill(&self) -> Intensity {
-        self.vibration_fill_with(self.vibration_mode)
-    }
-
-    /// 기능 키: 진동 방식을 다음 것으로 넘기고 음성으로 알려 줍니다.
-    ///
-    /// 연주 도중에도 바로 바뀌므로, 같은 노트를 두 방식으로 번갈아 느껴 볼 수 있습니다.
-    /// 음악(효과음 트랙)과 TTS 는 트랙이 달라서 안내 음성이 곡을 끊지 않습니다.
-    fn cycle_vibration_mode(&mut self, context: &mut Context) {
-        self.vibration_mode = self.vibration_mode.next();
-
-        let label = self.vibration_mode.label(context.language);
-        // 시연 중 같은 안내를 반복할 수 있도록 forced 로 보냅니다.
-        context
-            .audio
-            .speak_text_with_option(label, SpeechOption::forced());
-        log::info!("진동 방식 전환: {:?}", self.vibration_mode);
-    }
-
-    /// 모드를 직접 지정하는 버전입니다. (테스트에서 세 모드를 모두 검증하기 위해 분리)
-    fn vibration_fill_with(&self, mode: VibrationMode) -> Intensity {
-        let Some(target) = self.upcoming_note() else {
-            return Intensity::OFF;
-        };
-        let lead = self.lead();
-        if lead <= 0.0 {
-            return Intensity::OFF;
-        }
-
-        let (lo, hi) = mode.level_range();
-        let level = self.vibration_level.clamp(lo, hi);
-
-        // 창은 **항상 예고 그대로**입니다. 방식이나 단계에 따라 늘리지 않습니다.
-        //
-        // 점멸의 낮은 단계는 반주기가 예고보다 길어 창 안에 주기가 담기지 않습니다.
-        // 1단계(1Hz)는 반주기가 500ms 라 예고 200ms 가 통째로 한 반주기에 들어가고,
-        // 펌웨어가 절대 시각 기준으로 위상을 잡으므로(`firmware/src/braille_display.rs`)
-        // 어느 반주기에 걸릴지는 노트마다 다릅니다 — **진동이 아예 안 뜨는 노트가 생깁니다.**
-        //
-        // 그게 그 단계의 실제 한계이므로 숨기지 않고 그대로 보여 줍니다.
-        // 창을 늘려 억지로 보이게 하면 단계마다 예고 길이가 달라져 게임이 흔들립니다.
-        let window = lead;
-
-        // 진동 전용 시계입니다. 판정 시계(`now_s`)보다 출력 지연만큼 앞서 갑니다.
-        // 핀 값을 바꿔도 손끝에 닿기까지 시간이 걸리므로, 그만큼 미리 내보내야
-        // 실제로 느껴지는 시점이 음악과 맞습니다.
-        let cue_now = self.now_s + TACTILE_OUTPUT_DELAY_MS as f32 / 1000.0;
-
-        // 예고 구간은 정확히 `[T - lead, T]` 입니다.
-        // 노트 시각을 지나면 최고조를 유지하지 않고 **즉시 꺼집니다.**
-        // 진동이 뚝 끊기는 그 순간이 곧 "지금 누르세요" 신호라, 피크를 손끝으로 집어낼 수 있습니다.
-        // (최고조를 판정 끝까지 유지하면 꽉 찬 상태가 220ms 이어져 피크가 뭉개집니다.)
-        // 시작과 끝에 서로 다른 시계를 씁니다.
-        //
-        // * **시작**은 보정된 시계(`cue_now`) 기준 — `now_s = T - 예고 - 보정` 에 켜집니다.
-        //   전송·PWM 지연을 타고 손끝에 닿을 때쯤이면 정확히 `T - 예고` 가 됩니다.
-        // * **끝**은 판정 시계(`now_s`) 기준 — `now_s = T` 에 꺼집니다.
-        //   보정해서 미리 끄면 정작 쳐야 할 순간에 진동이 이미 없습니다.
-        //
-        // 그래서 켜져 있는 구간은 `[T - 예고 - 보정, T]`, 길이는 `예고 + 보정` 입니다.
-        let since_start = cue_now - (target - window);
-        if since_start < 0.0 || self.now_s > target {
-            return Intensity::OFF;
-        }
-        // 창 내내 이 레벨 하나로 고정입니다. 올라가거나 내려가지 않습니다.
-        // 두 모드의 차이는 "같은 레벨을 무엇으로 표현하느냐" 뿐입니다.
-        let value = level_to_value(level);
-
-        match mode {
-            // 듀티비 — 약 62.5Hz 반송파의 켜짐 비율을 바꿉니다.
-            VibrationMode::DutyRatio => Intensity::new(value),
-            // 점멸 주기 — 같은 레벨을 하드웨어 깜빡임 주기로 넘깁니다.
-            // 1~6 = 1·2·4·8·16·32Hz, 7 = 항상 켜짐.
-            VibrationMode::BlinkPeriod => Intensity::new_blink(value),
-        }
-    }
-
-    /// 곡 선택 화면에서 **계속** 내보낼 진동입니다. 노트 창과 무관합니다.
-    fn vibration_preview(&self) -> Intensity {
-        let (lo, hi) = self.vibration_mode.level_range();
-        let value = level_to_value(self.vibration_level.clamp(lo, hi));
-        match self.vibration_mode {
-            VibrationMode::DutyRatio => Intensity::new(value),
-            VibrationMode::BlinkPeriod => Intensity::new_blink(value),
-        }
-    }
-
-    /// A/D 키: 진동 단계를 현재 방식의 범위 안에서 조절하고 음성으로 알려 줍니다.
-    fn adjust_vibration_level(&mut self, context: &mut Context, delta: i8) {
-        let (lo, hi) = self.vibration_mode.level_range();
-        let next = (self.vibration_level.clamp(lo, hi) as i8 + delta).clamp(lo as i8, hi as i8) as u8;
-        if next == self.vibration_level {
-            return;
-        }
-        self.vibration_level = next;
-
-        // 내부 레벨은 0~7 이지만 사람에게는 1~8 로 말합니다.
-        let shown = spoken_level(next);
-        let label = match context.language {
-            Language::Ko => format!("{shown}단계"),
-            Language::Ja => format!("{shown}段階"),
-            _ => format!("level {shown}"),
-        };
-        context
-            .audio
-            .speak_text_with_option(&label, SpeechOption::forced());
-
-        match (self.vibration_mode, blink_frequency_hz(next)) {
-            (VibrationMode::BlinkPeriod, Some(hz)) => {
-                let lead_ms = self.lead() * 1000.0;
-                let half_ms = 500.0 / hz;
-                // 창이 경계를 하나도 안 넘을 확률 = 통째로 켜지거나 꺼질 확률
-                let solid = ((half_ms - lead_ms) / half_ms).max(0.0) * 100.0;
-                log::info!(
-                    "진동 단계 {shown} — 점멸 {hz}Hz(반주기 {half_ms:.0}ms), 예고 {lead_ms:.0}ms 에 평균 전환 {:.1}회{}",
-                    lead_ms / half_ms,
-                    if solid > 0.0 {
-                        format!(" ← 노트의 약 {solid:.0}% 는 깜빡임 없이 통째로 켜지거나 꺼집니다")
-                    } else {
-                        String::new()
-                    }
-                );
-            }
-            (VibrationMode::BlinkPeriod, None) => {
-                log::info!("진동 단계 {shown} — 점멸 모드지만 정적입니다 (1단계=꺼짐, 8단계=항상 켜짐)")
-            }
-            (VibrationMode::DutyRatio, _) => log::info!(
-                "진동 단계 {shown}/{} — 듀티비, 강도값 {}",
-                spoken_level(MAX_VIBRATION_LEVEL),
-                level_to_value(next)
-            ),
-        }
-    }
-
-    /// 이번 프레임에 그려야 할 내용을 계산합니다.
-    fn compute_visual(&self, width: i16) -> Visual {
-        match self.state {
-            GameState::Playing => {
-                let total = self.song().map(|s| s.end_secs()).unwrap_or(1.0).max(0.001);
-                Visual {
-                    fill: self.vibration_fill(),
-                    progress_px: ((self.now_s / total).clamp(0.0, 1.0) * width as f32) as i16,
-                    flash: self.now_s < self.flash_until_s,
-                }
-            }
-            _ => Visual::default(),
-        }
-    }
-
-    /// 화면 중앙 원의 바깥 지름입니다.
-    fn circle_diameter(size: Size) -> i16 {
-        // 화면에 들어가는 선에서 `VIBRATING_DISC_DIAMETER` 를 씁니다.
-        // 그 상수는 전체 프레임 전송 임계값(384핀)과 묶여 있으니 주석을 보세요.
-        VIBRATING_DISC_DIAMETER
-            .min(size.width.min(size.height) - 4)
-            .max(2)
-    }
-
-    /// 판정된 입력들의 평균 타이밍 오차(ms). 입력이 없으면 `None`.
-    ///
-    /// **양수 = 게임 시계보다 늦게 누름.** 플레이어는 귀로 듣는 음악에 맞춰 누르므로,
-    /// 이 값은 곧 `context.audio.play()` 호출 시점과 실제로 소리가 나기 시작한 시점의
-    /// 차이(= 오디오 출력 지연)에 가깝습니다.
-    ///
-    /// 따라서 보정값은 부호를 뒤집으면 됩니다: `AUDIO_OFFSET_MS = -(평균 오차)`.
-    /// 지연은 기기마다 다르므로(PC 웹 시뮬레이터와 실기가 다릅니다) 각각 재서 맞춰야 합니다.
-    fn mean_timing_error_ms(&self) -> Option<i32> {
-        if self.timing_error_count == 0 {
-            return None;
-        }
-        let mean_s = self.timing_error_sum / self.timing_error_count as f32;
-        Some((mean_s * 1000.0).round() as i32)
-    }
-
-    /// 정확도 = 실제로 얻은 점수 / 전부 최고 판정이었을 때의 점수.
-    /// 점수표(`HIT_TIERS`)에서 파생되므로 단계를 바꿔도 따로 고칠 필요가 없습니다.
-    fn accuracy(&self) -> f32 {
-        let judged = self.perfect + self.good + self.miss;
-        if judged == 0 {
-            return 0.0;
-        }
-        let best = judged * Judge::best_score();
-        self.score as f32 / best as f32
-    }
 }
 
-impl Applet for RhythmGame {
+impl Applet for TactileRhythm {
     fn on_start(&mut self, context: &mut Context) -> Result<()> {
         let _ = sdk::api::log::init();
         self.songs = load_songs();
         self.selected = 0;
-        self.state = GameState::SongSelect;
+        self.state = GameState::Standby;
+        // 열자마자 지금 고른 곡을 작게 틀어 어떤 곡인지 알 수 있게 합니다.
+        self.play_preview(context);
+
         log::info!(
-            "rhythm-game 시작: 곡 {}개, 화면 {:?}, 진동 모드 = {:?} (기능 키로 전환)",
+            "TactileRhythm 시작: 곡 {}개, 화면 {:?}, 예고 {}ms, 미리보내기 {}ms",
             self.songs.len(),
             context.window.get_size(),
-            self.vibration_mode
+            CUE_MS,
+            PRE_SEND_MS
         );
         Ok(())
     }
 
-    /// 애플릿이 종료될 때(런처 복귀, 전원 키, ExitApp 등) 런타임이 호출합니다.
-    /// 음악이 계속 흘러나오지 않도록 여기서 반드시 끊습니다.
     fn on_stop(&mut self, context: &mut Context) -> Result<()> {
         self.stop_music(context);
         Ok(())
@@ -1174,121 +1225,154 @@ impl Applet for RhythmGame {
 
     fn on_update(&mut self, context: &mut Context) -> Result<UpdateResult> {
         let now = context.time.get_monotonic_time();
-        let width = context.window.get_size().width;
+        self.wall_s = now.as_secs_f32();
         let mut needs_redraw = false;
 
-        // --- 입력 ---------------------------------------------------------
         while let KeypadPopResult::Event(event) = context.keypad.pop_event() {
             if event.state != KeyState::Pressed {
                 continue;
             }
 
-            // --- 진동 조절 키 (왼쪽 키패드, 연주 중에만) ---------------------
+            // 나가기는 어느 화면에서든, 양쪽 키패드 모두 받습니다.
+            if event.code == KEY_EXIT {
+                self.stop_music(context);
+                if self.state == GameState::Playing || self.state == GameState::Countdown {
+                    self.state = GameState::Standby;
+                    needs_redraw = true;
+                    continue;
+                }
+                return Ok(UpdateResult::ExitApp);
+            }
+
+            // 가운데 키 — 양쪽 키패드 모두 받습니다.
             //
-            // 웹 시뮬레이터 라벨 기준으로 S / A / D 입니다.
-            // (`runtime-web/src/runner.rs` 매핑: S=Down, A=Left, D=Right, 모두 왼쪽)
-            //
-            // **왼쪽 키패드 = 진동 조절**, 오른쪽 키패드 = 화면 이동으로 나눕니다.
-            // 곡 선택 화면에서도 조절할 수 있어야 Blink8 처럼 느긋하게 비교할 수 있고,
-            // 곡 고르기는 오른쪽 방향키로 그대로 됩니다. 메뉴 키는 양쪽 다 나가기입니다.
-            if event.side == KeypadSide::Left && event.code != KeyCode::Menu {
-                match event.code {
-                    // S — 진동 방식 전환 (듀티비 ↔ 점멸 주기)
-                    KeyCode::Down => {
-                        self.cycle_vibration_mode(context);
+            // 대기 화면에서는 카운트다운을 시작하고, 결과 화면에서는 대기로 돌아갑니다.
+            // **연주 중에는 여기서 가로채지 않고** 아래 타격 처리로 흘려보냅니다.
+            // 같은 키가 화면에 따라 다른 일을 하는 건, 세 화면이 서로 배타적이기 때문입니다.
+            if event.code == KEY_START && self.state != GameState::Playing {
+                match self.state {
+                    GameState::Standby => {
+                        // 숫자 읽기가 묻히지 않도록 미리듣기를 먼저 끕니다.
+                        self.stop_music(context);
+                        self.begin_countdown(now);
                         needs_redraw = true;
-                        continue;
                     }
-                    // A — 단계 줄이기
-                    KeyCode::Left => {
-                        self.adjust_vibration_level(context, -1);
+                    GameState::Result => {
+                        self.state = GameState::Standby;
+                        self.play_preview(context);
                         needs_redraw = true;
-                        continue;
-                    }
-                    // D — 단계 늘리기
-                    KeyCode::Right => {
-                        self.adjust_vibration_level(context, 1);
-                        needs_redraw = true;
-                        continue;
                     }
                     _ => {}
                 }
+                continue;
             }
 
-            match (self.state, event.code) {
-                // 곡 선택: 좌/우로 곡을 넘기면 on_speech 가 곡 이름을 읽어 줍니다.
-                (GameState::SongSelect, KeyCode::Left | KeyCode::Up) => {
-                    if !self.songs.is_empty() {
-                        self.selected = (self.selected + self.songs.len() - 1) % self.songs.len();
-                        needs_redraw = true;
-                    }
-                }
-                (GameState::SongSelect, KeyCode::Right | KeyCode::Down) => {
-                    if !self.songs.is_empty() {
-                        self.selected = (self.selected + 1) % self.songs.len();
-                        needs_redraw = true;
-                    }
-                }
-                // Enter(가운데 키)로 연주 시작
-                (GameState::SongSelect, KeyCode::Center) => {
-                    self.start_song(context, now);
+            // 타격 키. 연주 중에만 먹습니다.
+            if KEY_HIT_LEFT.matches(&event) {
+                if self.state == GameState::Playing {
+                    self.on_hit(Side::Left);
                     needs_redraw = true;
                 }
+                continue;
+            }
+            if KEY_HIT_RIGHT.matches(&event) {
+                if self.state == GameState::Playing {
+                    self.on_hit(Side::Right);
+                    needs_redraw = true;
+                }
+                continue;
+            }
 
-                // 연주 중: Space(가운데 키)로 타격
-                (GameState::Playing, KeyCode::Center) => {
-                    if let Some(t) = self.upcoming_note() {
-                        log::info!(
-                            "[계측] 타격 now={:.3} 노트={:.3} 오차={:+.0}ms",
-                            self.now_s,
-                            t,
-                            (self.now_s - t) * 1000.0
-                        );
-                    }
-                    self.on_hit();
-                    needs_redraw = true;
-                }
-                // 연주 중 메뉴 키는 연주를 중단하고 곡 선택으로 되돌아갑니다.
-                (GameState::Playing, KeyCode::Menu) => {
-                    self.stop_music(context);
-                    self.state = GameState::SongSelect;
-                    needs_redraw = true;
-                }
+            // --- 아래는 전부 대기 화면 전용입니다 -----------------------------
+            //
+            // 연주 중에 모드나 프리셋이 바뀌면 그 곡의 측정이 통째로 의미를 잃습니다.
+            // 그래서 여기서 한 번에 막습니다.
+            if self.state != GameState::Standby {
+                continue;
+            }
 
-                (GameState::Result, KeyCode::Center) => {
-                    self.state = GameState::SongSelect;
+            if KEY_MODE.matches(&event) {
+                self.play_mode = self.play_mode.next();
+                let label = self.play_mode.label().get(context.language).to_string();
+                self.announce(context, label);
+                log::info!("모드 전환: {:?}", self.play_mode);
+                needs_redraw = true;
+            } else if KEY_PRESET_NEXT.matches(&event) {
+                let count = self.play_mode.preset_count();
+                let idx = match self.play_mode {
+                    PlayMode::Rhythm => &mut self.preset_rhythm,
+                    PlayMode::Listen => &mut self.preset_listen,
+                };
+                *idx = (*idx + 1) % count;
+
+                let shown = self.preset_index() + 1;
+                let preset = self.preset();
+                let label = format!("{} {}", TEXT_PRESET.get(context.language), shown);
+                self.announce(context, label);
+                log::info!(
+                    "프리셋 {}/{} = {:?} ({:?})",
+                    shown,
+                    count,
+                    preset,
+                    self.play_mode
+                );
+                needs_redraw = true;
+            } else if KEY_SONG_NEXT.matches(&event) {
+                if !self.songs.is_empty() {
+                    self.selected = (self.selected + 1) % self.songs.len();
+                    if let Some(song) = self.songs.get(self.selected) {
+                        let title = song.title(context.language).to_string();
+                        self.announce(context, title);
+                    }
+                    // 제목만으로는 어떤 곡인지 모를 수 있으니 작게 틀어 줍니다.
+                    self.play_preview(context);
                     needs_redraw = true;
                 }
-                (GameState::Result | GameState::SongSelect, KeyCode::Menu) => {
-                    // ExitApp 을 반환해도 런타임이 on_stop 을 불러 주지만,
-                    // 종료 경로가 어떻든 음악이 남지 않도록 여기서도 확실히 끊습니다.
-                    self.stop_music(context);
-                    return Ok(UpdateResult::ExitApp);
-                }
-                _ => {}
             }
         }
 
-        // --- 시간 진행 ----------------------------------------------------
+        // 미리듣기 응답은 쓸 데가 없지만, 받아 가지 않으면 런타임에 쌓입니다.
+        if let Some(id) = self.preview_request
+            && context.http.take_response(id).is_some()
+        {
+            self.preview_request = None;
+        }
+
+        // --- 카운트다운 ------------------------------------------------------
+        if self.state == GameState::Countdown {
+            match self.countdown_tick(now) {
+                CountdownStep::Speak(text) => {
+                    context
+                        .audio
+                        .speak_text_with_option(text, SpeechOption::forced());
+                }
+                CountdownStep::Done => {
+                    self.start_song(context, now);
+                    needs_redraw = true;
+                }
+                CountdownStep::Wait => {}
+            }
+        }
+
+        // --- 시간 진행 ------------------------------------------------------
         if self.state == GameState::Playing {
             self.poll_audio_sync(context, now);
 
             if !self.sync_locked {
-                // 아직 음악이 실제로 나오기 전입니다. 시계를 0 에 묶어 두어
-                // 디코딩이 끝나기 전에 노트가 지나가 버리는 일을 막습니다.
+                // 음악이 아직 안 나왔습니다. 시계를 0 에 묶어 둡니다.
                 self.now_s = 0.0;
             } else {
                 self.now_s = now.saturating_sub(self.started_at).as_secs_f32()
                     + AUDIO_OFFSET_MS as f32 / 1000.0;
-                self.reap_missed_notes();
+                self.reap_notes();
             }
 
             if self.sync_locked && self.is_finished() {
-                // 음악이 자연스럽게 끝난 뒤이므로 따로 끊지 않습니다.
                 self.state = GameState::Result;
                 needs_redraw = true;
                 log::info!(
-                    "연주 종료: score={}, max_combo={}, P/G/M = {}/{}/{}",
+                    "연주 종료: {:?}, score={}, max_combo={}, P/G/M = {}/{}/{}",
+                    self.play_mode,
                     self.score,
                     self.max_combo,
                     self.perfect,
@@ -1296,46 +1380,15 @@ impl Applet for RhythmGame {
                     self.miss
                 );
                 if let Some(err_ms) = self.mean_timing_error_ms() {
-                    log::info!(
-                        "평균 타이밍 오차 {err_ms}ms (양수=늦게 누름). \
-                         현재 AUDIO_OFFSET_MS={AUDIO_OFFSET_MS}, 권장값={}",
-                        AUDIO_OFFSET_MS - err_ms as i64
-                    );
+                    log::info!("평균 타이밍 오차 {err_ms}ms (양수=늦게 누름)");
                 }
             }
         }
 
-        // 진동 위상이나 진행 막대가 바뀌었을 때만 다시 그립니다.
-        let visual = self.compute_visual(width);
+        let visual = self.compute_visual();
         if visual != self.visual {
             self.visual = visual;
             needs_redraw = true;
-        }
-
-        // --- 계측: 진동이 언제 켜지고 꺼지는지 게임 시계 기준으로 기록 ---------
-        if self.state == GameState::Playing && self.sync_locked {
-            let cur = self.visual.fill.value;
-            let target = self.upcoming_note();
-            if self.probe_prev_fill == 0 && cur > 0 {
-                self.probe_onset_s = Some(self.now_s);
-                if let Some(t) = target {
-                    log::info!(
-                        "[계측] 진동 켜짐 now={:.3} 노트={:.3} 남은시간={:.0}ms (예고={:.0}ms)",
-                        self.now_s,
-                        t,
-                        (t - self.now_s) * 1000.0,
-                        self.lead() * 1000.0
-                    );
-                }
-            } else if self.probe_prev_fill > 0 && cur == 0 {
-                let onset = self.probe_onset_s.take().unwrap_or(self.now_s);
-                log::info!(
-                    "[계측] 진동 꺼짐 now={:.3} 지속={:.0}ms",
-                    self.now_s,
-                    (self.now_s - onset) * 1000.0
-                );
-            }
-            self.probe_prev_fill = cur;
         }
 
         if needs_redraw {
@@ -1345,6 +1398,11 @@ impl Applet for RhythmGame {
         }
     }
 
+    /// 좌우 큰 원 두 개만 그립니다.
+    ///
+    /// 진행 막대 같은 작은 장식을 넣지 않는 이유는 **갱신 시간을 고정하기 위해서**입니다.
+    /// 원 하나(448핀)가 바뀌면 런타임이 전체 프레임을 보내 67ms 가 걸리는데,
+    /// 작은 요소가 따로 바뀌면 그 사이에 짧은 차이 전송이 끼어들어 타이밍이 흔들립니다.
     fn on_draw(&self, canvas: &mut dyn DisplayInterface) -> Result<()> {
         canvas.clear();
 
@@ -1352,82 +1410,16 @@ impl Applet for RhythmGame {
         if size.width <= 0 || size.height <= 0 {
             return Ok(());
         }
+        let diameter = circle_diameter(size);
+        let cy = size.height / 2;
 
-        let center = Point::new(size.width / 2, size.height / 2);
-        let diameter = Self::circle_diameter(size);
-
-        match self.state {
-            GameState::SongSelect => {
-                // 원을 지금 설정 그대로 **계속** 진동시킵니다. 끄지 않습니다.
-                //
-                // 연주 중 예고는 길어야 1.1초라 느린 주기는 한 주기도 담기지 않습니다.
-                // 여기서는 계속 켜 두므로 S / A·D 로 방식과 단계를 천천히 비교할 수 있습니다.
-                // 손가락 올릴 위치를 찾는 역할도 겸합니다.
-                // 레벨 0 은 값이 0 이라 아무것도 그리지 않습니다.
-                let intensity = self.vibration_preview();
-                if intensity.value > 0 {
-                    // `draw_circle` 이 아니라 `fill_circle` 입니다 — blink 보존 때문입니다.
-                    fill_circle(canvas, center, diameter, intensity);
-                }
-
-                // 곡 개수만큼 점을 찍고 현재 선택된 곡만 강하게 표시합니다.
-                let count = self.songs.len().max(1) as i16;
-                let gap = 3;
-                let total_w = (count - 1) * gap;
-                let start_x = center.x - total_w / 2;
-                for i in 0..count {
-                    let strong = i as usize == self.selected;
-                    canvas.set_pin(
-                        Point::new(start_x + i * gap, size.height - 2),
-                        if strong {
-                            Intensity::MAX
-                        } else {
-                            Intensity::new(80)
-                        },
-                    );
-                }
-            }
-            GameState::Playing => {
-                // 진동하는 안쪽 원. 선형 모드에서는 애플릿이 직접 켜고 끄고,
-                // 하드웨어 모드에서는 blink 강도를 그대로 넘겨 장치가 깜빡이게 합니다.
-                // 테두리를 따로 그리지 않고 **원 전체를 하나의 균일한 강도**로 채웁니다.
-                // 정적인 테두리 + 강해지는 중심 조합은 "가운데만 세진다"는 느낌을 줍니다.
-                let fill = self.visual.fill;
-                if fill.value > 0 {
-                    // `draw_circle` 이 아니라 `fill_circle` 입니다 — blink 보존 때문입니다.
-                    fill_circle(canvas, center, Self::circle_diameter(size), fill);
-                }
-
-                // 곡 진행 막대 (맨 아랫줄)
-                if self.visual.progress_px > 0 {
-                    canvas.draw_line(
-                        Point::new(0, size.height - 1),
-                        Point::new(self.visual.progress_px - 1, size.height - 1),
-                        Style::with_stroke(Intensity::new(120), 1),
-                    );
-                }
-
-                // 판정 직후 표시 (맨 윗줄). Perfect 는 길게, Miss 는 짧게.
-                if self.visual.flash
-                    && let Some(judge) = self.last_judge
-                {
-                    let len = (size.width as f32 * judge.flash_ratio()) as i16;
-                    canvas.draw_line(
-                        Point::new(0, 0),
-                        Point::new(len.max(1) - 1, 0),
-                        Style::with_stroke(Intensity::MAX, 1),
-                    );
-                }
-            }
-            GameState::Result => {
-                canvas.draw_circle(center, diameter, Style::with_stroke(Intensity::new(90), 1));
-                // 정확도를 가로 막대 길이로 표현합니다.
-                let len = (self.accuracy() * size.width as f32) as i16;
-                canvas.draw_line(
-                    Point::new(0, size.height - 1),
-                    Point::new(len.max(1) - 1, size.height - 1),
-                    Style::with_stroke(Intensity::MAX, 1),
-                );
+        for (cx, code) in [
+            (size.width / 4, self.visual.left),
+            (size.width * 3 / 4, self.visual.right),
+        ] {
+            let intensity = code_to_intensity(code);
+            if intensity.value > 0 {
+                fill_circle(canvas, Point::new(cx, cy), diameter, intensity);
             }
         }
 
@@ -1435,61 +1427,49 @@ impl Applet for RhythmGame {
     }
 
     fn on_speech(&self, context: &Context) -> SpeechResult {
-        // 반환값이 직전과 달라졌을 때만 실제로 음성이 나갑니다.
+        let lang = context.language;
         match self.state {
-            GameState::SongSelect => {
+            GameState::Standby => {
                 let Some(song) = self.song() else {
-                    return SpeechResult::text(match context.language {
-                        Language::Ko => "재생할 수 있는 곡이 없습니다.",
-                        Language::Ja => "再生できる曲がありません。",
-                        _ => "No playable songs.",
-                    });
+                    return SpeechResult::text(TEXT_NO_SONG.get(lang).to_string());
                 };
-                let title = song.title(context.language);
-                SpeechResult::text(match context.language {
-                    Language::Ko => format!(
-                        "{}번, {}. 시작하려면 가운데 키를 누르세요.",
-                        self.selected + 1,
-                        title
-                    ),
-                    Language::Ja => format!(
-                        "{}番、{}。開始するには中央キーを押してください。",
-                        self.selected + 1,
-                        title
-                    ),
-                    _ => format!(
-                        "Track {}, {}. Press the center key to start.",
-                        self.selected + 1,
-                        title
-                    ),
-                })
+                SpeechResult::text(format!(
+                    "{}. {}. {} {}.",
+                    song.title(lang),
+                    self.play_mode.label().get(lang),
+                    TEXT_PRESET.get(lang),
+                    self.preset_index() + 1
+                ))
             }
-            // 연주 중에는 음악과 겹치므로 말하지 않습니다.
+            // 카운트다운 중에는 숫자 읽기를 방해하지 않도록 조용히 둡니다.
+            GameState::Countdown => SpeechResult::None,
+            // 연주 중에는 아무 말도 하지 않습니다.
+            // 카운트다운 직후에 끼어들어 "삼 이 일 연주 중입니다" 가 되어 버립니다.
             GameState::Playing => SpeechResult::None,
-            GameState::Result => SpeechResult::text(match context.language {
+            GameState::Result => SpeechResult::text(match lang {
                 Language::Ko => format!(
-                    "연주 종료. 점수 {}점, 정확도 {}퍼센트, 최대 콤보 {}. 퍼펙트 {}, 굿 {}, 미스 {}. 곡 선택으로 돌아가려면 가운데 키를 누르세요.",
-                    self.score,
-                    (self.accuracy() * 100.0) as u32,
-                    self.max_combo,
+                    "결과. 정확도 {:.0}퍼센트. 퍼펙트 {}, 굿 {}, 미스 {}. 최대 콤보 {}.",
+                    self.accuracy(),
                     self.perfect,
                     self.good,
-                    self.miss
+                    self.miss,
+                    self.max_combo
                 ),
                 Language::Ja => format!(
-                    "演奏終了。スコア{}点、正確度{}パーセント、最大コンボ{}。",
-                    self.score,
-                    (self.accuracy() * 100.0) as u32,
+                    "結果。正確度 {:.0}パーセント。パーフェクト {}、グッド {}、ミス {}。最大コンボ {}。",
+                    self.accuracy(),
+                    self.perfect,
+                    self.good,
+                    self.miss,
                     self.max_combo
                 ),
                 _ => format!(
-                    "Finished. Score {}, accuracy {} percent, max combo {}. Perfect {}, good {}, miss {}. Press the center key to pick another track.",
-                    self.score,
-                    (self.accuracy() * 100.0) as u32,
-                    self.max_combo,
+                    "Result. Accuracy {:.0} percent. Perfect {}, good {}, miss {}. Max combo {}.",
+                    self.accuracy(),
                     self.perfect,
                     self.good,
-                    self.miss
+                    self.miss,
+                    self.max_combo
                 ),
             }),
         }
@@ -1497,1114 +1477,717 @@ impl Applet for RhythmGame {
 
     fn on_help(&self, _context: &Context) -> LocalizedString {
         LocalizedString {
-            ko: "리듬 게임입니다. 곡 선택 화면에서 좌우 키로 곡을 고르고 가운데 키를 누르면 연주가 시작됩니다. 화면 가운데 원의 진동이 점점 강해지다가 가장 강해지는 순간에 가운데 키를 누르세요. 왼쪽 키패드로 진동을 조절합니다. 아래 키로 방식을 바꾸고, 왼쪽 키와 오른쪽 키로 단계를 1부터 8까지 조절합니다. 두 방식 모두 같은 범위입니다. 곡 선택 화면에서는 원이 그 설정대로 계속 진동하므로 천천히 비교해 볼 수 있습니다. 곡은 오른쪽 방향키로 고릅니다. 메뉴 키를 누르면 연주를 중단하거나 애플릿을 종료합니다."
+            ko: "좌우에 원이 하나씩 있습니다. 양쪽 가운데 키로 연주를 시작하면 삼, 이, 일 카운트다운 뒤에 음악이 나옵니다. 왼쪽 원은 왼쪽 가운데 키, 오른쪽 원은 오른쪽 가운데 키로 칩니다. 곡이 끝나면 가운데 키로 대기 화면에 돌아가 다시 할 수 있습니다. 대기 화면에서 오른쪽 좌우 키로 곡을, E로 모드를, W와 S로 진동 프리셋을 바꿉니다. 모드는 리듬 게임과 감상 두 가지입니다. 메뉴 키로 중단하거나 종료합니다."
                 .to_string(),
-            en: "Rhythm game. On the song select screen use left and right to choose a track, then press the center key to start. The circle in the middle vibrates more and more strongly; press the center key at its peak. The left keypad adjusts the vibration: down switches the style, left and right adjust the level from 1 to 8. Both styles use the same range. On the song select screen the circle keeps vibrating with that setting so you can compare at your own pace. Pick songs with the right arrow keys. Press menu to stop or exit."
+            en: "There is one circle on each side. Press either center key to start; the music begins after a three, two, one countdown. Hit the left circle with the left center key and the right one with the right center key. When the song ends, the center key returns to the standby screen for another go. On the standby screen, the right arrow keys change the song, E switches the mode, and W and S change the vibration preset. The two modes are rhythm game and listening. Press menu to stop or exit."
                 .to_string(),
-            ja: "リズムゲームです。曲選択画面で左右キーで曲を選び、中央キーで演奏を開始します。中央の円の振動が徐々に強くなり、最も強くなった瞬間に中央キーを押してください。左キーパッドで振動を調整します。下キーで方式、左キーと右キーで段階を1から8まで調整します。どちらの方式も同じ範囲です。曲選択画面では円がその設定で振動し続けるのでゆっくり比較できます。曲は右の方向キーで選びます。メニューキーで中断または終了します。"
+            ja: "左右に円が一つずつあります。両方の中央キーで演奏を開始すると、三、二、一のカウントダウンの後に音楽が流れます。左は左の中央キー、右は右の中央キーで叩きます。曲が終わったら中央キーで待機画面に戻り、もう一度遊べます。待機画面で右の方向キーで曲、Eでモード、WとSで振動プリセットを変更します。モードはリズムゲームと鑑賞の二つです。メニューキーで中断または終了します。"
                 .to_string(),
         }
     }
 }
 
-/// WASM 런타임 진입점 함수 정의
+/// WASM 런타임 진입점
 #[unsafe(no_mangle)]
 pub extern "C" fn run() {
-    sdk::run(Box::new(RhythmGame::default()));
+    sdk::run(Box::new(TactileRhythm::default()));
 }
 
 #[cfg(test)]
 mod tests {
-    use sdk::api::keypad::KeypadEvent;
     use super::*;
     use sdk::api::display::Canvas;
 
-    /// 진동 전용 시계는 판정 시계(`now_s`)보다 `TACTILE_OUTPUT_DELAY_MS` 만큼 앞섭니다.
-    /// 테스트에서 "진동 기준으로 시각 t" 를 만들려면 `now_s` 를 그만큼 되돌려 놓아야 합니다.
-    const CUE_ADVANCE_S: f32 = TACTILE_OUTPUT_DELAY_MS as f32 / 1000.0;
+    const SIZE: Size = Size {
+        width: 48,
+        height: 32,
+    };
 
-    /// 왼쪽 키패드의 키를 한 번 누르고 `on_update` 를 한 바퀴 돌립니다.
-    fn press_left(game: &mut RhythmGame, context: &mut Context, code: KeyCode) {
-        context.keypad.push_event_front(KeypadEvent {
-            code,
+    fn game() -> TactileRhythm {
+        let mut g = TactileRhythm::default();
+        g.songs = load_songs();
+        assert!(!g.songs.is_empty(), "채보를 읽지 못했습니다");
+        let song = &g.songs[0];
+        g.left.notes = song.left_notes.clone();
+        g.right.notes = song.right_notes.clone();
+        g
+    }
+
+    /// 연주 중인 상태로 만들어 둡니다. (시계가 풀려야 진동이 나갑니다)
+    fn playing() -> TactileRhythm {
+        let mut g = game();
+        g.state = GameState::Playing;
+        g.sync_locked = true;
+        g
+    }
+
+    fn press(g: &mut TactileRhythm, ctx: &mut Context, key: Key) {
+        ctx.keypad.push_event_front(KeypadEvent {
+            code: key.code,
             state: KeyState::Pressed,
-            side: KeypadSide::Left,
+            side: key.side,
         });
-        game.on_update(context).expect("on_update 실패");
+        g.on_update(ctx).expect("on_update 실패");
     }
 
-    fn set_cue_time(game: &mut RhythmGame, cue_time: f32) {
-        game.now_s = cue_time - CUE_ADVANCE_S;
+    fn lit_pins(g: &TactileRhythm) -> usize {
+        let mut canvas = Canvas::new(SIZE);
+        g.on_draw(&mut canvas).expect("on_draw 실패");
+        (0..SIZE.height)
+            .flat_map(|y| (0..SIZE.width).map(move |x| Point::new(x, y)))
+            .filter(|&pt| canvas.get_pin(pt).value > 0)
+            .count()
     }
 
-    fn loaded_game() -> RhythmGame {
-        let game = RhythmGame {
-            songs: load_songs(),
-            ..RhythmGame::default()
-        };
-        assert!(!game.songs.is_empty(), "채보를 하나도 읽지 못했습니다");
-        game
-    }
+    // --- 2키 배치 ----------------------------------------------------------
 
-    /// 음악이 실제로 시작되기 전에는 시계가 0 에 묶여 있어야 합니다.
-    /// 그렇지 않으면 디코딩이 끝나기도 전에 앞부분 노트들이 Miss 로 흘러갑니다.
+    /// 원 하나가 바뀔 때마다 **전체 프레임**이 나가야 갱신 시간이 67ms 로 고정됩니다.
+    ///
+    /// 런타임은 바뀐 핀이 384개 이상일 때만 전체 프레임을 보냅니다
+    /// (`runtime-native/src/hal/display/braille_display.rs` 의 `is_full_frame`).
+    /// 원이 그보다 작으면 핀 개수에 따라 전송 시간이 들쭉날쭉해집니다.
     #[test]
-    fn clock_is_frozen_until_audio_actually_starts() {
-        let mut game = loaded_game();
-        let mut context = Context::new();
+    fn each_circle_alone_forces_a_full_frame() {
+        const FULL_FRAME_THRESHOLD: usize = 48 * 32 / 2 / 2; // 384
 
-        game.start_song(&mut context, Duration::ZERO);
-        assert_eq!(game.state, GameState::Playing);
+        let mut g = playing();
+        // 왼쪽만 켠 상태
+        g.visual = Visual { left: 7, right: 0 };
+        let left_only = lit_pins(&g);
         assert!(
-            !game.sync_locked,
-            "아직 재생 위치를 확인하지 못한 상태여야 합니다"
+            left_only >= FULL_FRAME_THRESHOLD,
+            "원 하나가 {left_only}핀뿐이라 전체 프레임 기준({FULL_FRAME_THRESHOLD})에 못 미칩니다"
         );
 
-        // 이 시점에 on_update 가 여러 번 돌아도 시간이 흐르면 안 됩니다.
-        for _ in 0..5 {
-            game.on_update(&mut context).expect("on_update 실패");
-        }
-        assert_eq!(game.now_s, 0.0, "동기화 전에는 시계가 멈춰 있어야 합니다");
-        assert_eq!(game.miss, 0, "동기화 전에 노트가 사라지면 안 됩니다");
-        assert_eq!(game.next_note, 0);
+        // 오른쪽만 켠 상태도 같아야 합니다.
+        g.visual = Visual { left: 0, right: 7 };
+        assert_eq!(lit_pins(&g), left_only, "좌우 원의 크기가 달라서는 안 됩니다");
+
+        // 둘 다 켜면 정확히 두 배 — 겹치지 않는다는 뜻입니다.
+        g.visual = Visual { left: 7, right: 7 };
+        assert_eq!(lit_pins(&g), left_only * 2, "두 원이 겹칩니다");
     }
 
-    /// audio-service 가 없어도 게임이 영원히 멈춰 있으면 안 됩니다.
-    /// 일정 시간이 지나면 요청 시점 기준으로 진행을 시작해야 합니다.
+    /// 왼쪽 원은 Space, 오른쪽 원은 Enter 에만 반응해야 합니다.
     #[test]
-    fn falls_back_when_the_audio_service_never_responds() {
-        let mut game = loaded_game();
-        let mut context = Context::new();
+    fn each_circle_answers_only_its_own_key() {
+        let mut ctx = Context::new();
 
-        game.start_song(&mut context, Duration::ZERO);
-        assert!(!game.sync_locked);
+        // `on_update` 가 키를 처리한 뒤 시계를 다시 쓰므로, 누름마다 새 상태에서 봅니다.
+        let mut g = playing();
+        let left_note = g.left.notes[0];
+        g.now_s = left_note;
+        press(&mut g, &mut ctx, KEY_HIT_RIGHT);
+        assert_eq!(g.left.next, 0, "오른쪽 키가 왼쪽 노트를 먹었습니다");
 
-        // 타임아웃 직전
-        game.poll_audio_sync(
-            &mut context,
-            Duration::from_millis(SYNC_TIMEOUT_MS) - Duration::from_millis(1),
-        );
-        assert!(!game.sync_locked, "타임아웃 전에는 기다려야 합니다");
+        let mut g = playing();
+        g.now_s = left_note;
+        press(&mut g, &mut ctx, KEY_HIT_LEFT);
+        assert_eq!(g.left.next, 1, "왼쪽 키로 왼쪽 노트가 판정되어야 합니다");
 
-        // 타임아웃 이후
-        game.poll_audio_sync(
-            &mut context,
-            Duration::from_millis(SYNC_TIMEOUT_MS) + Duration::from_millis(1),
-        );
-        assert!(game.sync_locked, "타임아웃 후에는 진행을 시작해야 합니다");
-        assert_eq!(game.started_at, game.play_requested_at);
+        // 반대쪽도 같은 규칙입니다.
+        let mut g = playing();
+        let right_note = g.right.notes[0];
+        g.now_s = right_note;
+        press(&mut g, &mut ctx, KEY_HIT_LEFT);
+        assert_eq!(g.right.next, 0, "왼쪽 키가 오른쪽 노트를 먹었습니다");
+
+        let mut g = playing();
+        g.now_s = right_note;
+        press(&mut g, &mut ctx, KEY_HIT_RIGHT);
+        assert_eq!(g.right.next, 1, "오른쪽 키로 오른쪽 노트가 판정되어야 합니다");
     }
 
-    /// 판정표 자체가 앞뒤가 맞는지 — 오차는 커지고 점수는 작아지는 순서여야 합니다.
+    /// 채보가 한 레인뿐이면 좌우로 번갈아 배정되어야 합니다.
+    #[test]
+    fn single_lane_charts_alternate_between_the_two_circles() {
+        let g = game();
+        let song = &g.songs[0];
+        let total = song.left_notes.len() + song.right_notes.len();
+        assert!(total > 4, "노트가 너무 적어 확인할 수 없습니다");
+        assert!(
+            song.left_notes.len().abs_diff(song.right_notes.len()) <= 1,
+            "좌우 노트 수가 크게 어긋납니다: {} / {}",
+            song.left_notes.len(),
+            song.right_notes.len()
+        );
+        // 번갈아 배정했다면 두 목록을 합쳐 정렬한 것이 원래 순서와 같아야 합니다.
+        let mut merged: Vec<f32> = song
+            .left_notes
+            .iter()
+            .chain(song.right_notes.iter())
+            .copied()
+            .collect();
+        merged.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(merged.len(), total);
+    }
+
+    // --- 진동 일정 ----------------------------------------------------------
+
+    /// 리듬게임: 예고를 절반으로 갈라 2단계, 그 뒤 HOLDING.
+    #[test]
+    fn rhythm_plan_has_two_cue_steps_then_holding() {
+        let mut g = playing();
+        g.play_mode = PlayMode::Rhythm;
+        g.preset_rhythm = 2; // [1, 5, 7] — 세 단계가 모두 0 이 아님
+        let t = 10.0;
+        let cue = g.cue_s();
+        let plan = g.plan_for(t);
+
+        assert_eq!(plan[0], (t - cue, 1), "1단계는 예고 시작부터");
+        assert_eq!(plan[1], (t - cue / 2.0, 5), "2단계는 예고 한가운데부터");
+        assert_eq!(plan[2], (t, 7), "HOLDING 은 노트 시각부터");
+        assert_eq!(
+            plan[3],
+            (t + HOLD_MAX_MS as f32 / 1000.0, 0),
+            "HOLDING 은 최대 시간이 지나면 꺼져야 합니다"
+        );
+    }
+
+    /// 감상: 노트 시각을 한가운데 두고 전후 절반씩, HOLDING 없음.
+    #[test]
+    fn listen_plan_is_centred_on_the_note() {
+        let mut g = playing();
+        g.play_mode = PlayMode::Listen;
+        g.preset_listen = 0; // [1, 5]
+        let t = 10.0;
+        let half = g.cue_s() / 2.0;
+        let plan = g.plan_for(t);
+
+        assert_eq!(plan[0], (t - half, 1), "앞 절반");
+        assert_eq!(plan[1], (t, 5), "뒤 절반은 노트 시각부터");
+        assert_eq!(plan[2], (t + half, 0), "창이 끝나면 꺼짐");
+        assert_eq!(plan[3].1, 0, "감상 모드에는 HOLDING 이 없습니다");
+    }
+
+    /// **켜는 변화는 67ms 미리, 끄는 변화는 제시간에.**
+    ///
+    /// 사양의 핵심입니다. 전송에 67ms 가 걸리므로 켜는 쪽만 앞당깁니다.
+    #[test]
+    fn turning_on_is_pre_sent_but_turning_off_is_not() {
+        let pre = PRE_SEND_MS as f32 / 1000.0;
+        let t = 10.0;
+        // (렌더링 시각, 코드)
+        let plan: Plan = [(t - 0.22, 3), (t - 0.11, 7), (t, 0), (t + 0.5, 0)];
+
+        // 1단계: t-0.22 에 보이려면 t-0.287 에 나가야 합니다.
+        assert_eq!(value_at(&plan, t - 0.22 - pre - 0.001), 0, "너무 이릅니다");
+        assert_eq!(value_at(&plan, t - 0.22 - pre + 0.001), 3, "67ms 앞서 나가야 합니다");
+
+        // 2단계: 사양에 적힌 t - (220/2 + 67) 지점입니다.
+        assert_eq!(value_at(&plan, t - 0.11 - pre + 0.001), 7);
+
+        // 끄기: 앞당기지 않습니다. t-0.001 에는 아직 7 이어야 합니다.
+        assert_eq!(value_at(&plan, t - 0.001), 7, "끄는 것을 미리 보내면 안 됩니다");
+        assert_eq!(value_at(&plan, t + 0.001), 0, "끄기는 제시간에");
+    }
+
+    /// HOLDING 이 0 인 프리셋([3,7,0])은 노트 시각에 **바로** 꺼져야 합니다.
+    /// 0 은 끄는 변화이므로 미리 보내지 않습니다.
+    #[test]
+    fn zero_holding_turns_off_exactly_at_the_note() {
+        let mut g = playing();
+        g.play_mode = PlayMode::Rhythm;
+        g.preset_rhythm = 0; // [3, 7, 0]
+        let t = g.left.notes[0];
+
+        g.now_s = t - 0.001;
+        assert_eq!(g.code_for(Side::Left), 7, "노트 직전에는 2단계가 살아 있어야 합니다");
+        g.now_s = t + 0.001;
+        assert_eq!(g.code_for(Side::Left), 0, "노트 시각에 꺼져야 합니다");
+    }
+
+    /// 타격하면 HOLDING 이 즉시 끊겨야 합니다.
+    #[test]
+    fn hitting_stops_the_holding_vibration() {
+        let mut g = playing();
+        g.play_mode = PlayMode::Rhythm;
+        g.preset_rhythm = 2; // HOLDING = 7
+        let t = g.left.notes[0];
+
+        g.now_s = t + 0.05;
+        assert_eq!(g.code_for(Side::Left), 7, "타격 전에는 HOLDING 이 돌아야 합니다");
+
+        g.on_hit(Side::Left);
+        assert_eq!(g.left.next, 1);
+        assert_eq!(g.code_for(Side::Left), 0, "치면 바로 꺼져야 합니다");
+    }
+
+    /// 치지 않아도 HOLDING 은 최대 시간에서 멈춰야 합니다.
+    #[test]
+    fn holding_stops_after_the_maximum() {
+        let mut g = playing();
+        g.play_mode = PlayMode::Rhythm;
+        g.preset_rhythm = 2;
+        let t = g.left.notes[0];
+        let hold = HOLD_MAX_MS as f32 / 1000.0;
+
+        g.now_s = t + hold - 0.01;
+        assert_eq!(g.code_for(Side::Left), 7);
+        g.now_s = t + hold + 0.01;
+        assert_eq!(g.code_for(Side::Left), 0, "최대 시간이 지나면 꺼져야 합니다");
+    }
+
+    /// 진동이 나가기도 전에 누른 것은 판정하지 않습니다.
+    #[test]
+    fn presses_before_the_cue_goes_out_are_ignored() {
+        let mut g = playing();
+        g.play_mode = PlayMode::Rhythm;
+        let t = g.left.notes[0];
+        let opens = g.hit_opens_at(t);
+
+        g.now_s = opens - 0.01;
+        g.on_hit(Side::Left);
+        assert_eq!(g.left.next, 0, "노트를 소비하면 안 됩니다");
+        assert_eq!(g.perfect + g.good + g.miss, 0, "판정이 붙으면 안 됩니다");
+
+        g.now_s = opens + 0.01;
+        g.on_hit(Side::Left);
+        assert_eq!(g.left.next, 1, "진동이 나간 뒤에는 판정되어야 합니다");
+    }
+
+    /// 감상 모드에서는 타격을 받지 않습니다.
+    #[test]
+    fn listening_mode_ignores_hits() {
+        let mut g = playing();
+        g.play_mode = PlayMode::Listen;
+        g.now_s = g.left.notes[0];
+        g.on_hit(Side::Left);
+        assert_eq!(g.left.next, 0, "감상 모드는 입력을 받지 않습니다");
+        assert_eq!(g.perfect + g.good, 0);
+    }
+
+    // --- 모드와 프리셋 -------------------------------------------------------
+
+    /// 모드·프리셋·곡 변경은 **대기 화면에서만** 되어야 합니다.
+    #[test]
+    fn settings_only_change_on_the_standby_screen() {
+        let mut ctx = Context::new();
+
+        // 대기 화면에서는 바뀝니다.
+        let mut g = game();
+        assert_eq!(g.state, GameState::Standby);
+        press(&mut g, &mut ctx, KEY_MODE);
+        assert_eq!(g.play_mode, PlayMode::Listen, "대기 화면에서는 모드가 바뀌어야 합니다");
+        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        assert_eq!(g.preset_listen, 1);
+
+        // 연주 중에는 안 바뀝니다.
+        let mut g = playing();
+        let (mode, preset) = (g.play_mode, g.preset_rhythm);
+        press(&mut g, &mut ctx, KEY_MODE);
+        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        press(&mut g, &mut ctx, KEY_SONG_NEXT);
+        assert_eq!(g.play_mode, mode, "연주 중에 모드가 바뀌었습니다");
+        assert_eq!(g.preset_rhythm, preset, "연주 중에 프리셋이 바뀌었습니다");
+    }
+
+    /// 프리셋은 모드마다 따로 기억되고, 끝에서 한 바퀴 돌아야 합니다.
+    #[test]
+    fn presets_wrap_and_are_remembered_per_mode() {
+        let mut ctx = Context::new();
+        let mut g = game();
+
+        for expected in 1..RHYTHM_PRESETS.len() {
+            press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+            assert_eq!(g.preset_rhythm, expected);
+        }
+        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        assert_eq!(g.preset_rhythm, 0, "끝에서 처음으로 돌아와야 합니다");
+
+        // 감상 모드로 가도 리듬 프리셋은 그대로 남아 있어야 합니다.
+        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        let kept = g.preset_rhythm;
+        assert_eq!(kept, 1);
+        press(&mut g, &mut ctx, KEY_MODE);
+        assert_eq!(g.play_mode, PlayMode::Listen);
+        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        press(&mut g, &mut ctx, KEY_MODE);
+        assert_eq!(g.play_mode, PlayMode::Rhythm);
+        assert_eq!(g.preset_rhythm, kept, "모드를 오가면 프리셋이 유지되어야 합니다");
+    }
+
+    /// 프리셋 숫자가 그대로 4비트 코드로 나가야 합니다.
+    #[test]
+    fn preset_numbers_reach_the_wire_unchanged() {
+        /// `runtime-native/src/hal/display/mod.rs` 의 `map_intensity_to_4bit`
+        fn to_4bit(i: Intensity) -> u8 {
+            let level = ((i.value as u16 * 7 + 127) / 255) as u8;
+            if i.blink { 8 + level } else { level }
+        }
+        for code in 0..16u8 {
+            assert_eq!(
+                to_4bit(code_to_intensity(code)),
+                code,
+                "코드 {code} 가 전송 과정에서 바뀝니다"
+            );
+        }
+    }
+
+    /// 판정표는 허용치가 오름차순이어야 하고, 경계가 서로 맞물려야 합니다.
     #[test]
     fn judge_tiers_are_consistent() {
-        assert!(!HIT_TIERS.is_empty());
-        for pair in HIT_TIERS.windows(2) {
-            let (a_judge, a_tol, a_score) = pair[0];
-            let (b_judge, b_tol, b_score) = pair[1];
-            assert!(
-                a_tol < b_tol,
-                "{a_judge:?}({a_tol}) 가 {b_judge:?}({b_tol}) 보다 너그럽습니다"
-            );
-            assert!(
-                a_score > b_score,
-                "{a_judge:?}({a_score}점) 이 {b_judge:?}({b_score}점) 보다 낮습니다"
-            );
-        }
-        assert!(
-            HIT_TIERS.iter().all(|(judge, _, _)| *judge != Judge::Miss),
-            "Miss 는 표에 들어가면 안 됩니다"
-        );
-        assert_eq!(
-            HIT_WINDOW_S,
-            HIT_TIERS[HIT_TIERS.len() - 1].1,
-            "칠 수 있는 한계는 표의 가장 너그러운 값이어야 합니다"
-        );
-        assert_eq!(Judge::Miss.score(), 0);
-        assert_eq!(Judge::Miss.tolerance(), None);
-        assert!(!Judge::Miss.keeps_combo());
-    }
-
-    /// 각 단계의 경계에서 판정이 정확히 갈리는지 확인합니다.
-    #[test]
-    fn judge_boundaries() {
-        let perfect = Judge::Perfect.tolerance().unwrap();
-        let good = Judge::Good.tolerance().unwrap();
-
-        assert_eq!(Judge::from_error(0.0), Some(Judge::Perfect));
-        assert_eq!(
-            Judge::from_error(perfect),
-            Some(Judge::Perfect),
-            "경계 포함"
-        );
-        assert_eq!(Judge::from_error(perfect + 0.001), Some(Judge::Good));
-        assert_eq!(Judge::from_error(good), Some(Judge::Good), "경계 포함");
-        assert_eq!(
-            Judge::from_error(good + 0.001),
-            None,
-            "한계를 넘으면 판정 없음"
-        );
-    }
-
-    /// 예전에 있던 사각지대(칠 수 있는 한계 ~ Miss 확정 시각 사이)가 사라졌는지 확인합니다.
-    /// 칠 수 있는 경계를 넘긴 노트는 그 즉시 Miss 로 확정되어야 합니다.
-    #[test]
-    fn no_dead_zone_after_the_hit_window() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-
-        // 경계 바로 안쪽: 아직 Miss 가 아니고, 누르면 판정이 됩니다.
-        game.now_s = target + HIT_WINDOW_S - 0.001;
-        game.reap_missed_notes();
-        assert_eq!(game.miss, 0, "아직 칠 수 있는 시점입니다");
-        game.on_hit();
-        assert_eq!(game.good, 1, "경계 안쪽이므로 Good 이어야 합니다");
-
-        // 다음 노트를 경계 바로 바깥으로 넘겨 봅니다.
-        let second = game.song().unwrap().notes[1];
-        game.now_s = second + HIT_WINDOW_S + 0.001;
-        game.on_hit();
-        assert_eq!(game.good, 1, "한계를 넘긴 입력은 무시되어야 합니다");
-        game.reap_missed_notes();
-        assert_eq!(game.miss, 1, "같은 시점에 Miss 로 확정되어야 합니다");
-    }
-
-    /// 정확도가 점수표와 일치해야 합니다.
-    #[test]
-    fn accuracy_follows_the_score_table() {
-        let mut game = loaded_game();
-
-        game.perfect = 10;
-        game.score = 10 * Judge::Perfect.score();
-        assert!((game.accuracy() - 1.0).abs() < 1e-6, "전부 Perfect 면 100%");
-
-        game = loaded_game();
-        game.miss = 10;
-        game.score = 0;
-        assert!((game.accuracy() - 0.0).abs() < 1e-6, "전부 Miss 면 0%");
-
-        game = loaded_game();
-        game.good = 10;
-        game.score = 10 * Judge::Good.score();
-        let expected = Judge::Good.score() as f32 / Judge::Perfect.score() as f32;
-        assert!(
-            (game.accuracy() - expected).abs() < 1e-6,
-            "전부 Good 이면 {expected}, 실제 {}",
-            game.accuracy()
-        );
-    }
-
-    /// `LEAD_OVERRIDE_MS` 가 채보의 `seconds_per_beat` 보다 우선 적용되어야 합니다.
-    #[test]
-    fn lead_override_wins_over_the_chart() {
-        let game = loaded_game();
-        let chart_lead = game.song().unwrap().lead;
-        assert_eq!(chart_lead, 0.3, "채보 원본 값은 그대로 보존되어야 합니다");
-
-        match LEAD_OVERRIDE_MS {
-            Some(ms) => {
-                let expected = ms as f32 / 1000.0;
-                assert!(
-                    (game.lead() - expected).abs() < 1e-6,
-                    "예고 시간이 {expected}초여야 하는데 {}초입니다",
-                    game.lead()
-                );
-                assert!(
-                    (0.05..=1.00).contains(&game.lead()),
-                    "예고 시간이 상식적인 범위를 벗어났습니다: {}초",
-                    game.lead()
-                );
-            }
-            None => assert_eq!(game.lead(), chart_lead),
-        }
-    }
-
-    /// mp3 헤더에서 실제 재생 길이를 읽어야 합니다.
-    /// (파이썬으로 프레임을 세어 확인한 값: 44.1kHz, 2170 프레임, 56.686초)
-    #[test]
-    fn mp3_duration_is_parsed() {
-        let secs = mp3_duration_secs(SONG_ASSETS[0].audio).expect("mp3 길이를 읽지 못했습니다");
-        assert!(
-            (secs - 56.686).abs() < 0.05,
-            "mp3 길이가 예상과 다릅니다: {secs}초"
-        );
-    }
-
-    /// 마지막 노트(50.311초)가 지나도 음악이 끝나는 56.686초까지는 결과로 넘어가면 안 됩니다.
-    #[test]
-    fn result_waits_for_the_music_to_end() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-
-        let last_note = *game.song().unwrap().notes.last().unwrap();
-        let end = game.song().unwrap().end_secs();
-        assert!(
-            end > last_note + 1.0,
-            "음원 길이가 아니라 마지막 노트 기준으로 끝나고 있습니다 (end={end}, last={last_note})"
-        );
-
-        // 모든 노트를 판정한 상태로 만듭니다.
-        game.next_note = game.song().unwrap().notes.len();
-
-        game.now_s = last_note + 0.5;
-        assert!(!game.is_finished(), "마지막 노트 직후에 끝나면 안 됩니다");
-
-        game.now_s = end - 0.1;
-        assert!(!game.is_finished(), "음악이 아직 남았는데 끝나면 안 됩니다");
-
-        game.now_s = end;
-        assert!(game.is_finished(), "음악이 끝나면 결과로 넘어가야 합니다");
-    }
-
-    /// 아직 판정할 노트가 남아 있으면 음원이 끝나도 결과로 넘어가지 않습니다.
-    #[test]
-    fn unjudged_notes_block_the_result_screen() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        game.next_note = 0;
-        game.now_s = game.song().unwrap().end_secs() + 5.0;
-        assert!(!game.is_finished());
-    }
-
-    /// 제공된 JSON 이 기대한 대로 읽히는지 확인합니다.
-    #[test]
-    fn chart_is_parsed() {
-        let game = loaded_game();
-        let song = game.song().expect("곡");
-        assert_eq!(song.lead, 0.3, "meta.seconds_per_beat 이 예고 시간입니다");
-        assert_eq!(song.notes.len(), 36);
-        assert!((song.notes[0] - 1.465).abs() < 1e-6);
-        // 정렬 보장
-        assert!(song.notes.windows(2).all(|w| w[0] <= w[1]));
-    }
-
-    /// 예고는 반드시 노트 시각 *이전에* 시작되어야 합니다.
-    #[test]
-    fn vibration_starts_one_lead_before_the_note() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0]; // 1.465
-        let lead = game.lead(); // 0.3
-
-        // 예고 시작 직전에는 원이 비어 있어야 합니다.
-        set_cue_time(&mut game, target - lead - 0.01);
-        assert_eq!(game.vibration_fill(), Intensity::OFF);
-
-        // 예고 구간 안에서는 한 번이라도 켜지는 순간이 있어야 합니다.
-        let mut lit = 0;
-        let mut t = target - lead;
-        while t < target {
-            set_cue_time(&mut game, t);
-            if game.vibration_fill().value > 0 {
-                lit += 1;
-            }
-            t += 0.005;
-        }
-        assert!(lit > 0, "예고 구간에서 진동이 전혀 관측되지 않았습니다");
-    }
-
-    /// 기능 키를 누르면 진동 방식이 순환하고, 세 번 누르면 처음으로 돌아와야 합니다.
-    /// 실제 `on_update` 경로를 그대로 태워서 키 매핑까지 함께 검증합니다.
-    ///
-    /// 시뮬레이터 라벨로 S = 왼쪽 Down 입니다.
-    #[test]
-    fn s_key_cycles_vibration_modes() {
-        let mut game = loaded_game();
-        let mut context = Context::new();
-        game.state = GameState::Playing;
-        assert_eq!(game.vibration_mode, VibrationMode::DutyRatio);
-
-        press_left(&mut game, &mut context, KeyCode::Down);
-        assert_eq!(game.vibration_mode, VibrationMode::BlinkPeriod);
-
-        press_left(&mut game, &mut context, KeyCode::Down);
-        assert_eq!(
-            game.vibration_mode,
-            VibrationMode::DutyRatio,
-            "두 번 누르면 처음 방식으로 돌아와야 합니다"
-        );
-    }
-
-    /// A = 왼쪽 Left 로 단계를 내리고, D = 왼쪽 Right 로 올립니다.
-    /// 단계 번호가 곧 하드웨어 레벨이므로 범위는 1~7 입니다.
-    #[test]
-    fn a_and_d_adjust_the_vibration_level() {
-        let mut game = loaded_game();
-        let mut context = Context::new();
-        game.state = GameState::Playing;
-        assert_eq!(game.vibration_level, DEFAULT_VIBRATION_LEVEL);
-
-        // 최소까지 내립니다.
-        for expected in (MIN_VIBRATION_LEVEL..DEFAULT_VIBRATION_LEVEL).rev() {
-            press_left(&mut game, &mut context, KeyCode::Left);
-            assert_eq!(game.vibration_level, expected);
-        }
-
-        // 최소에서 더 눌러도 0 으로 내려가지 않습니다. 0 은 "꺼짐"이라 설정값이 못 됩니다.
-        press_left(&mut game, &mut context, KeyCode::Left);
-        assert_eq!(game.vibration_level, MIN_VIBRATION_LEVEL);
-
-        // 다시 최대까지 올립니다.
-        for expected in (MIN_VIBRATION_LEVEL + 1)..=MAX_VIBRATION_LEVEL {
-            press_left(&mut game, &mut context, KeyCode::Right);
-            assert_eq!(game.vibration_level, expected);
-        }
-
-        // 최대에서 더 눌러도 넘어가지 않습니다.
-        press_left(&mut game, &mut context, KeyCode::Right);
-        assert_eq!(game.vibration_level, MAX_VIBRATION_LEVEL);
-    }
-
-    /// 설정한 단계가 그대로 하드웨어 레벨로 나와야 합니다.
-    /// 1단계면 레벨 1, 7단계면 레벨 7 — 예고 내내 고정입니다.
-    #[test]
-    fn the_step_number_is_the_hardware_level() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-
-        for level in MIN_VIBRATION_LEVEL..=MAX_VIBRATION_LEVEL {
-            game.vibration_level = level;
-
-            // 예고 구간 전체를 훑어도 레벨이 변하지 않아야 합니다.
-            let mut t = target - lead - CUE_ADVANCE_S;
-            while t < target {
-                game.now_s = t;
-                let v = game.vibration_fill().value;
-                let got = (v as u16 * 7 + 127) / 255;
-                assert_eq!(
-                    got, level as u16,
-                    "레벨 {level} 인데 레벨 {got} 이 나왔습니다 (now_s={t})"
-                );
-                t += 0.005;
-            }
-        }
-    }
-
-    /// 왼쪽 키패드는 **어느 화면에서든** 진동 조절입니다.
-    /// 곡 선택 화면에서도 조절돼야 Blink8 처럼 느긋하게 비교할 수 있습니다.
-    #[test]
-    fn left_keypad_adjusts_vibration_on_the_song_select_screen() {
-        let mut game = loaded_game();
-        let mut context = Context::new();
-        assert_eq!(game.state, GameState::SongSelect);
-
-        game.vibration_level = 4;
-        press_left(&mut game, &mut context, KeyCode::Left);
-        assert_eq!(game.vibration_level, 3, "곡 선택 화면에서도 단계가 내려가야 합니다");
-
-        press_left(&mut game, &mut context, KeyCode::Right);
-        assert_eq!(game.vibration_level, 4, "곡 선택 화면에서도 단계가 올라가야 합니다");
-
-        let before = game.vibration_mode;
-        press_left(&mut game, &mut context, KeyCode::Down);
-        assert_ne!(game.vibration_mode, before, "곡 선택 화면에서도 방식이 바뀌어야 합니다");
-    }
-
-    /// 곡 고르기는 **오른쪽** 방향키로 그대로 되어야 합니다.
-    #[test]
-    fn the_right_keypad_still_picks_songs() {
-        let mut game = loaded_game();
-        let mut context = Context::new();
-        assert_eq!(game.state, GameState::SongSelect);
-
-        let before = game.selected;
-        context.keypad.push_event_front(KeypadEvent {
-            code: KeyCode::Right,
-            state: KeyState::Pressed,
-            side: KeypadSide::Right,
-        });
-        game.on_update(&mut context).expect("on_update 실패");
-
-        // 곡이 하나뿐이면 제자리로 돌아오므로, 단계가 안 바뀌었는지로 확인합니다.
-        assert_eq!(
-            game.vibration_level, DEFAULT_VIBRATION_LEVEL,
-            "오른쪽 방향키는 진동 단계를 건드리면 안 됩니다"
-        );
-        assert_eq!(
-            game.selected,
-            (before + 1) % game.songs.len().max(1),
-            "오른쪽 방향키로 곡이 넘어가야 합니다"
-        );
-    }
-
-    /// **회귀 테스트.** 점멸 모드로 그린 핀은 화면까지 `blink` 를 달고 가야 합니다.
-    ///
-    /// `graphics` 확장의 `draw_circle`/`draw_rectangle` 은 내부적으로 `Gray8` 을 거치고
-    /// `Intensity::from(color.luma())` 로 되돌리기 때문에 `blink` 가 조용히 사라집니다.
-    /// 그 경로로 그리면 점멸 모드가 그냥 듀티 모드가 되어, 손끝으로만 알 수 있습니다.
-    /// 그래서 `fill_circle` 로 `set_pin` 을 직접 호출합니다.
-    #[test]
-    fn blink_flag_survives_all_the_way_to_the_canvas() {
-        let size = Size::new(48, 32);
-
-        for (state, label) in [
-            (GameState::SongSelect, "곡 선택 격자"),
-            (GameState::Playing, "연주 중 원"),
-        ] {
-            let mut game = loaded_game();
-            game.state = state;
-            game.vibration_mode = VibrationMode::BlinkPeriod;
-            game.vibration_level = 4;
-
-            if state == GameState::Playing {
-                // 진동이 켜져 있는 순간으로 맞춥니다.
-                let target = game.song().unwrap().notes[0];
-                game.now_s = target - 0.01;
-                game.visual = game.compute_visual(size.width);
-                assert!(game.visual.fill.blink, "{label}: 계산 단계에서 이미 blink 가 없습니다");
-            }
-
-            let mut canvas = Canvas::new(size);
-            game.on_draw(&mut canvas).expect("on_draw 실패");
-
-            // 곡 표시용 점과 곡 진행 막대는 진동이 아니라 정적 표시이므로
-            // 맨 아래 두 줄은 검사에서 뺍니다.
-            let scan_bottom = size.height - 2;
-
-            let mut lit = 0usize;
-            let mut blinking = 0usize;
-            for y in 0..scan_bottom {
-                for x in 0..size.width {
-                    let pin = canvas.get_pin(Point::new(x, y));
-                    if pin.value > 0 {
-                        lit += 1;
-                        if pin.blink {
-                            blinking += 1;
-                        }
-                    }
-                }
-            }
-
-            assert!(lit > 0, "{label}: 그려진 핀이 없습니다");
+        let mut prev = 0.0f32;
+        for (judge, tolerance, score) in HIT_TIERS {
+            assert!(tolerance > prev, "허용치가 오름차순이어야 합니다: {tolerance}");
+            assert!(score > 0, "{judge:?} 의 점수가 0 입니다");
             assert_eq!(
-                blinking, lit,
-                "{label}: 켜진 {lit}핀 중 {blinking}핀만 blink 입니다.                  graphics 확장의 draw_* 를 쓰면 Gray8 을 거치며 blink 가 버려집니다."
+                judge.tolerance(),
+                Some(tolerance),
+                "{judge:?} 의 허용치 조회가 표와 다릅니다"
             );
+            // 경계 바로 안쪽은 이 판정, 바깥쪽은 더 너그러운 판정이거나 없음.
+            assert_eq!(Judge::from_error(tolerance - 0.001), Some(judge));
+            prev = tolerance;
         }
+        assert_eq!(HIT_WINDOW_S, prev, "마지막 허용치가 칠 수 있는 한계여야 합니다");
+        assert_eq!(Judge::from_error(prev + 0.001), None, "한계를 넘으면 판정 없음");
+        assert_eq!(Judge::Miss.tolerance(), None, "Miss 는 경계가 없습니다");
     }
 
-    /// 듀티비 모드는 반대로 `blink` 가 붙으면 안 됩니다.
+    /// 대기 화면에서 **양쪽 가운데 키**로 카운트다운이 시작되어야 합니다.
     #[test]
-    fn duty_mode_never_sets_the_blink_flag() {
-        let size = Size::new(48, 32);
-        let mut game = loaded_game();
-        game.vibration_mode = VibrationMode::DutyRatio;
-
-        let mut canvas = Canvas::new(size);
-        game.on_draw(&mut canvas).expect("on_draw 실패");
-
-        for y in 0..size.height {
-            for x in 0..size.width {
-                let pin = canvas.get_pin(Point::new(x, y));
-                assert!(
-                    !pin.blink,
-                    "듀티비 모드인데 ({x},{y}) 핀에 blink 가 붙었습니다"
-                );
-            }
-        }
-    }
-
-    /// 두 방식 모두 하드웨어 전 범위(0~7)를 쓸 수 있어야 합니다.
-    ///
-    /// 점멸의 낮은 단계는 예고 창 안에 주기가 담기지 않지만, 확인용으로 막지 않습니다.
-    #[test]
-    fn both_modes_expose_the_full_level_range() {
-        for mode in [VibrationMode::DutyRatio, VibrationMode::BlinkPeriod] {
-            assert_eq!(
-                mode.level_range(),
-                (MIN_VIBRATION_LEVEL, MAX_VIBRATION_LEVEL),
-                "{mode:?} 가 전 범위를 쓰지 못합니다"
-            );
-        }
-
-        let mut game = loaded_game();
-        let mut context = Context::new();
-        game.vibration_mode = VibrationMode::BlinkPeriod;
-        game.vibration_level = MAX_VIBRATION_LEVEL;
-
-        // 0 까지 내려갑니다.
-        for expected in (MIN_VIBRATION_LEVEL..MAX_VIBRATION_LEVEL).rev() {
-            press_left(&mut game, &mut context, KeyCode::Left);
-            assert_eq!(game.vibration_level, expected);
-        }
-        press_left(&mut game, &mut context, KeyCode::Left);
-        assert_eq!(game.vibration_level, MIN_VIBRATION_LEVEL, "0 아래로는 안 내려갑니다");
-
-        // 7 까지 올라갑니다.
-        for expected in (MIN_VIBRATION_LEVEL + 1)..=MAX_VIBRATION_LEVEL {
-            press_left(&mut game, &mut context, KeyCode::Right);
-            assert_eq!(game.vibration_level, expected);
-        }
-        press_left(&mut game, &mut context, KeyCode::Right);
-        assert_eq!(game.vibration_level, MAX_VIBRATION_LEVEL, "7 위로는 안 올라갑니다");
-    }
-
-    /// 방식을 바꿔도 단계가 유지되어야 합니다. 두 방식의 범위가 같기 때문입니다.
-    #[test]
-    fn switching_mode_keeps_the_level() {
-        let mut game = loaded_game();
-        let mut context = Context::new();
-        game.vibration_level = 2;
-
-        press_left(&mut game, &mut context, KeyCode::Down);
-        assert_eq!(game.vibration_mode, VibrationMode::BlinkPeriod);
-        assert_eq!(game.vibration_level, 2, "방식을 바꿔도 단계는 그대로여야 합니다");
-
-        press_left(&mut game, &mut context, KeyCode::Down);
-        assert_eq!(game.vibration_mode, VibrationMode::DutyRatio);
-        assert_eq!(game.vibration_level, 2);
-    }
-
-    /// 나가기는 **양쪽** Menu 모두에서 되어야 합니다.
-    #[test]
-    fn either_menu_key_leaves_the_song() {
+    fn either_center_key_begins_the_countdown() {
         for side in [KeypadSide::Left, KeypadSide::Right] {
-            let mut game = loaded_game();
-            let mut context = Context::new();
-            game.state = GameState::Playing;
+            let mut ctx = Context::new();
+            let mut g = game();
+            assert_eq!(g.state, GameState::Standby);
 
-            context.keypad.push_event_front(KeypadEvent {
-                code: KeyCode::Menu,
-                state: KeyState::Pressed,
-                side,
-            });
-            game.on_update(&mut context).expect("on_update 실패");
-
+            press(&mut g, &mut ctx, Key::new(KEY_START, side));
             assert_eq!(
-                game.state,
-                GameState::SongSelect,
-                "{side:?} Menu 로 연주에서 빠져나올 수 있어야 합니다"
+                g.state,
+                GameState::Countdown,
+                "{side:?} 가운데 키로 카운트다운이 시작되지 않았습니다"
             );
         }
     }
 
-    /// 전환된 방식이 실제 렌더링에 반영되는지 확인합니다.
+    /// 카운트다운은 한 칸씩 읽고, 다 끝나야 연주가 시작됩니다.
     #[test]
-    fn switching_mode_changes_the_pin_behaviour() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        game.now_s = target - game.lead() / 2.0; // 예고 구간 한가운데
+    fn the_countdown_runs_then_starts_the_song() {
+        let mut g = game();
+        let step = COUNTDOWN_STEP_MS;
 
-        game.vibration_mode = VibrationMode::DutyRatio;
-        let swell = game.vibration_fill();
-        assert!(
-            !swell.blink,
-            "Swell 은 PWM 강도라 blink 가 꺼져 있어야 합니다"
-        );
+        // 카운트다운이 막 시작된 상태로 둡니다.
+        // (키로 들어가는 경로는 `either_center_key_begins_the_countdown` 가 봅니다)
+        g.state = GameState::Countdown;
+        g.countdown_at = Duration::ZERO;
+        g.countdown_spoken = 0;
 
-        game.vibration_mode = VibrationMode::BlinkPeriod;
-        let steps = game.vibration_fill();
-        assert!(steps.blink, "HardwareSteps 는 blink 가 켜져 있어야 합니다");
-    }
-
-    /// 기본 모드(Swell): 부팅/종료 애니메이션처럼 PWM 강도가 단조 증가해야 합니다.
-    /// 깜빡임 플래그가 켜지면 안 됩니다 — 켜지는 순간 느낌이 완전히 달라집니다.
-    #[test]
-    fn swell_ramps_up_monotonically() {
-        assert_eq!(
-            RhythmGame::default().vibration_mode,
-            VibrationMode::DutyRatio,
-            "기본 모드가 바뀌었습니다"
-        );
-
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-
-        // 누적 오차로 마지막 표본이 노트 시각에 못 미치지 않도록 i/STEPS 로 직접 계산합니다.
-        const STEPS: u32 = 32;
-        let mut prev = 0u8;
-        for i in 0..=STEPS {
-            let t = target - lead + lead * (i as f32 / STEPS as f32);
-            set_cue_time(&mut game, t);
-            let fill = game.vibration_fill();
-            assert!(!fill.blink, "Swell 모드는 깜빡임을 쓰지 않아야 합니다");
-            assert!(
-                fill.value >= prev,
-                "강도가 감소했습니다: {prev} -> {} (t={t})",
-                fill.value
-            );
-            prev = fill.value;
-        }
-
-        assert_eq!(prev, 255, "노트 시각에는 최대 강도여야 합니다");
-    }
-
-    /// 1단계 설정에서는 켜져 있는 내내 세기가 고정이어야 합니다.
-    /// 세기가 변하면 그만큼 핀을 다시 보내야 하므로, 전송 예산의 전제가 깨집니다.
-    #[test]
-    fn swell_holds_a_single_level_while_on() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-
-        let mut seen = std::collections::BTreeSet::new();
-        // 켜져 있어야 하는 구간 전체: [T - 예고 - 보정, T]
-        let mut t = target - lead - CUE_ADVANCE_S;
-        while t < target {
-            game.now_s = t;
-            let v = game.vibration_fill().value;
-            assert!(v > 0, "켜져 있어야 하는 구간인데 꺼졌습니다 (now_s={t})");
-            seen.insert((v as u16 * 7 + 127) / 255);
-            t += 0.001;
-        }
-
-        assert_eq!(
-            seen.iter().copied().collect::<Vec<_>>(),
-            vec![7],
-            "켜져 있는 내내 최대 단계 하나만 나와야 합니다"
-        );
-    }
-
-    /// 진동의 **시작**은 판정 시계보다 출력 지연만큼 앞서야 합니다.
-    /// 그래야 UART·PWM·핀 응답을 거쳐 손끝에 닿는 시점이 `T - 예고` 가 됩니다.
-    #[test]
-    fn vibration_starts_ahead_by_the_output_delay() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-        let on_at = target - lead - CUE_ADVANCE_S;
-
-        // 켜지기 직전
-        game.now_s = on_at - 0.002;
-        assert_eq!(
-            game.vibration_fill(),
-            Intensity::OFF,
-            "`T - 예고 - 보정` 이전에는 꺼져 있어야 합니다"
-        );
-
-        // 켜지는 순간
-        game.now_s = on_at + 0.002;
-        assert_eq!(
-            game.vibration_fill().value,
-            255,
-            "`T - 예고 - 보정` 부터 켜져야 합니다"
-        );
-    }
-
-    /// 끄는 시점은 보정하지 **않습니다.** 판정 시계로 정확히 `T` 에 꺼집니다.
-    ///
-    /// 미리 끄면 정작 쳐야 할 순간에 진동이 이미 사라져 있습니다.
-    /// 켜져 있는 구간은 `[T - 예고 - 보정, T]`, 길이는 `예고 + 보정` 입니다.
-    #[test]
-    fn vibration_stops_at_the_note_without_compensation() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-
-        // 노트 직전: 아직 최대 강도
-        game.now_s = target - 0.002;
-        assert_eq!(
-            game.vibration_fill().value,
-            255,
-            "노트 직전까지는 켜져 있어야 합니다"
-        );
-
-        // 노트 시각 직후: 즉시 꺼짐
-        game.now_s = target + 0.002;
-        assert_eq!(
-            game.vibration_fill(),
-            Intensity::OFF,
-            "노트를 지나면 바로 꺼져야 합니다"
-        );
-
-        // 켜져 있던 총 길이 = 예고 + 보정
-        let on_at = target - lead - CUE_ADVANCE_S;
-        assert!(
-            ((target - on_at) - (lead + CUE_ADVANCE_S)).abs() < 1e-6,
-            "지속 시간이 예고 + 보정이어야 합니다"
-        );
-
-        // 아직 칠 수 있는 구간이지만 진동은 없습니다.
-        game.now_s = target + HIT_WINDOW_S / 2.0;
-        assert_eq!(game.vibration_fill(), Intensity::OFF);
-        assert!(
-            Judge::from_error(HIT_WINDOW_S / 2.0).is_some(),
-            "진동이 꺼져도 판정은 아직 열려 있어야 합니다"
-        );
-    }
-
-    /// 듀티비 모드의 각 단계가 실제로 몇 % 듀티가 되는지 고정합니다.
-    ///
-    /// 애플릿 → 런타임 → 펌웨어의 세 변환을 모두 재현합니다. 어느 한쪽이 바뀌면
-    /// 여기서 걸립니다. (사람이 손으로 계산하다 틀리는 걸 막기 위한 테스트입니다)
-    #[test]
-    fn duty_levels_are_spaced_by_12_5_percent() {
-        /// `runtime-native/src/hal/display/mod.rs` 의 `map_intensity_to_4bit`
-        fn to_4bit(value: u8) -> u8 {
-            ((value as u16 * 7 + 127) / 255) as u8
-        }
-
-        /// `firmware/src/braille_display.rs` 의 PWM 판정.
-        ///
-        /// `counter` 는 `PWM_STEP`(16) 씩 더해지는 `u8` 이라 0,16,…,240 의 16칸입니다.
-        /// 코드 1~6 은 `코드 * 32 > counter`, 0 은 항상 꺼짐, 7 은 항상 켜짐입니다.
-        fn duty_percent(code: u8) -> f32 {
-            match code {
-                0 => 0.0,
-                7 => 100.0,
-                c => {
-                    let high = (0..16).filter(|k| (c as u16) * 32 > k * 16).count();
-                    high as f32 / 16.0 * 100.0
-                }
-            }
-        }
-
-        let duties: Vec<f32> = (0..=MAX_VIBRATION_LEVEL)
-            .map(|level| duty_percent(to_4bit(level_to_value(level))))
-            .collect();
-
-        assert_eq!(
-            duties,
-            vec![0.0, 12.5, 25.0, 37.5, 50.0, 62.5, 75.0, 100.0],
-            "듀티 간격이 12.5% 가 아닙니다"
-        );
-
-        // 0~6 단계는 정확히 12.5% 씩 올라갑니다.
-        for w in duties[..=6].windows(2) {
-            assert!(
-                (w[1] - w[0] - 12.5).abs() < 1e-3,
-                "{w:?} 사이 간격이 12.5% 가 아닙니다"
-            );
-        }
-
-        // 레벨 7 만 어긋납니다. 펌웨어가 코드 7 을 항상 켜짐으로 특수 처리하기 때문입니다.
-        assert_eq!(
-            duties[7] - duties[6],
-            25.0,
-            "레벨 7 은 펌웨어 특수 처리로 75% → 100% 로 건너뜁니다"
-        );
-    }
-
-    /// 진동이 나가기도 전에 누른 것은 **판정 자체를 하지 않아야** 합니다.
-    ///
-    /// 경계는 `hit_opens_at` = `T - 예고 - 출력지연` 입니다.
-    /// 노트를 소비하지도, 콤보를 끊지도, 타이밍 통계에 넣지도 않습니다.
-    #[test]
-    fn presses_before_the_cue_goes_out_are_ignored_entirely() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let opens = game.hit_opens_at(target);
-
-        // 경계는 진동이 실제로 켜지는 시점과 정확히 같아야 합니다.
-        game.now_s = opens - 0.001;
-        assert_eq!(
-            game.vibration_fill(),
-            Intensity::OFF,
-            "경계 직전에는 아직 진동이 안 나가야 합니다"
-        );
-        game.now_s = opens + 0.001;
-        assert!(
-            game.vibration_fill().value > 0,
-            "경계 직후에는 진동이 나가야 합니다"
-        );
-
-        // 경계 직전에 누르면 아무 일도 일어나지 않습니다.
-        game.now_s = opens - 0.001;
-        game.on_hit();
-        assert_eq!(game.next_note, 0, "노트를 소비하면 안 됩니다");
-        assert_eq!(game.perfect + game.good + game.miss, 0, "판정이 붙으면 안 됩니다");
-        assert_eq!(game.combo, 0);
-        assert_eq!(game.timing_error_count, 0, "타이밍 통계에도 들어가면 안 됩니다");
-
-        // 경계 직후에는 정상 판정됩니다.
-        game.now_s = opens + 0.001;
-        game.on_hit();
-        assert_eq!(game.next_note, 1, "경계 뒤에는 판정되어야 합니다");
-        assert_eq!(game.perfect + game.good, 1);
-    }
-
-    /// 허용치가 `예고 + 출력지연` 보다 길면, 그 사이 구간은
-    /// "허용치 안이지만 아직 진동이 안 나간" 상태라 무시되어야 합니다.
-    #[test]
-    fn the_tolerance_cannot_reach_past_the_cue_on_the_early_side() {
-        let game = loaded_game();
-        let reach = game.lead() + CUE_ADVANCE_S;
-
-        if HIT_WINDOW_S <= reach {
-            // 허용치가 짧아 겹치는 구간이 없으면 검사할 것이 없습니다.
-            return;
-        }
-
-        // 허용치 안이면서 경계보다 이른 시각 — 두 조건을 모두 만족하는 지점
-        let error = -(reach + HIT_WINDOW_S) / 2.0;
-        assert!(error.abs() < HIT_WINDOW_S, "허용치 안이어야 합니다");
-        assert!(error < -reach, "경계보다 일러야 합니다");
-
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-
-        game.now_s = target + error;
-        assert!(
-            Judge::from_error(error.abs()).is_some(),
-            "허용치만 보면 판정이 붙는 시각이어야 테스트가 성립합니다"
-        );
-
-        game.on_hit();
-        assert_eq!(game.next_note, 0, "허용치 안이라도 진동 전이면 무시해야 합니다");
-        assert_eq!(game.perfect + game.good + game.miss, 0);
-    }
-
-    /// 뒤쪽 경계는 그대로 허용치가 정합니다. 예고 때문에 좁아지면 안 됩니다.
-    #[test]
-    fn the_late_side_is_still_governed_by_the_tolerance() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-
-        // 허용치 바로 안쪽: 판정되어야 합니다.
-        game.now_s = target + HIT_WINDOW_S - 0.01;
-        game.on_hit();
-        assert_eq!(game.next_note, 1, "허용치 안이면 늦어도 판정되어야 합니다");
-
-        // 허용치 바깥: 무시됩니다.
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        game.now_s = target + HIT_WINDOW_S + 0.01;
-        game.on_hit();
-        assert_eq!(game.next_note, 0);
-    }
-
-    /// 사람에게 말하는 번호는 1~8, 내부 레벨은 0~7 이어야 합니다.
-    #[test]
-    fn levels_are_spoken_as_one_through_eight() {
-        assert_eq!(MIN_VIBRATION_LEVEL, 0);
-        assert_eq!(MAX_VIBRATION_LEVEL, 7);
-
-        let spoken: Vec<u8> = (MIN_VIBRATION_LEVEL..=MAX_VIBRATION_LEVEL)
-            .map(spoken_level)
-            .collect();
-        assert_eq!(spoken, (1..=8).collect::<Vec<_>>());
-    }
-
-    /// 레벨 0(= 1단계)은 **어느 화면에서도** 핀이 하나도 안 떠야 합니다.
-    /// (곡 표시용 점과 진행 막대는 진동이 아니므로 제외)
-    #[test]
-    fn level_zero_lights_no_pins() {
-        let size = Size::new(48, 32);
-
-        for mode in [VibrationMode::DutyRatio, VibrationMode::BlinkPeriod] {
-            // 곡 선택 화면
-            let mut game = loaded_game();
-            game.vibration_mode = mode;
-            game.vibration_level = 0;
-
-            let mut canvas = Canvas::new(size);
-            game.on_draw(&mut canvas).expect("on_draw 실패");
-            for y in 0..size.height - 2 {
-                for x in 0..size.width {
-                    assert_eq!(
-                        canvas.get_pin(Point::new(x, y)).value,
-                        0,
-                        "{mode:?} 레벨 0 인데 곡 선택 화면 ({x},{y}) 에 핀이 떴습니다"
-                    );
-                }
-            }
-
-            // 연주 중, 예고가 한창일 때
-            let mut game = loaded_game();
-            game.vibration_mode = mode;
-            game.vibration_level = 0;
-            game.state = GameState::Playing;
-            let target = game.song().unwrap().notes[0];
-            game.now_s = target - 0.01;
-            game.visual = game.compute_visual(size.width);
+        // 칸을 하나씩 넘기면 그때마다 한 번씩만 읽습니다.
+        for i in 0..COUNTDOWN.len() {
+            // i 번째 칸 한가운데
+            let now = Duration::from_millis(step * i as u64 + step / 2);
             assert_eq!(
-                game.visual.fill.value, 0,
-                "{mode:?} 레벨 0 인데 진동 세기가 0 이 아닙니다"
+                g.countdown_tick(now),
+                CountdownStep::Speak(COUNTDOWN[i]),
+                "{i}번째 칸에서 읽을 문구가 다릅니다"
             );
+            // 같은 칸에서 또 부르면 다시 읽지 않습니다.
+            assert_eq!(g.countdown_tick(now), CountdownStep::Wait, "같은 칸을 두 번 읽었습니다");
+        }
+
+        // 마지막 칸을 넘기면 끝났다고 알려 줍니다.
+        g.countdown_at = Duration::ZERO;
+        assert_eq!(
+            g.countdown_tick(Duration::from_millis(step * COUNTDOWN.len() as u64 + 10)),
+            CountdownStep::Done,
+            "카운트다운이 끝나야 합니다"
+        );
+    }
+
+    /// 카운트다운 중에는 진동이 나가면 안 됩니다.
+    #[test]
+    fn no_vibration_during_the_countdown() {
+        let mut g = game();
+        g.state = GameState::Countdown;
+        assert_eq!(g.compute_visual(), Visual::default());
+    }
+
+    /// 결과 화면에서 가운데 키를 누르면 대기 화면으로 돌아가 새 게임을 할 수 있어야 합니다.
+    #[test]
+    fn the_center_key_returns_from_the_result_screen() {
+        for side in [KeypadSide::Left, KeypadSide::Right] {
+            let mut ctx = Context::new();
+            let mut g = game();
+            g.state = GameState::Result;
+            g.score = 1234;
+
+            press(&mut g, &mut ctx, Key::new(KEY_START, side));
+            assert_eq!(g.state, GameState::Standby, "{side:?} 로 대기 화면에 못 돌아갔습니다");
+
+            // 거기서 다시 시작할 수 있어야 하고, 점수는 새로 시작할 때 초기화됩니다.
+            press(&mut g, &mut ctx, Key::new(KEY_START, side));
+            assert_eq!(g.state, GameState::Countdown);
         }
     }
 
-    /// 창은 **방식·단계와 무관하게 항상 예고 그대로**여야 합니다.
+    /// 가운데 키 하나가 화면에 따라 **다른 일**을 해야 합니다.
     ///
-    /// 점멸의 낮은 단계는 주기가 창에 안 담겨 노트마다 떴다 안 떴다 하는데,
-    /// 그게 그 단계의 실제 한계이므로 창을 늘려 숨기지 않습니다.
-    /// 늘리면 단계마다 예고 길이가 달라져 게임 타이밍이 흔들립니다.
+    /// 대기에서는 시작, 연주 중에는 타격, 결과에서는 대기로 복귀.
+    /// 세 화면이 배타적이라 한 키로 겸할 수 있는데, 입력 처리 순서가 어긋나면
+    /// 한쪽이 조용히 죽습니다(전에 실제로 그랬습니다).
     #[test]
-    fn the_window_is_always_the_lead_regardless_of_mode_or_level() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-        let on_at = target - lead - CUE_ADVANCE_S;
+    fn the_center_key_means_different_things_per_screen() {
+        // 대기 → 카운트다운
+        let mut ctx = Context::new();
+        let mut g = game();
+        press(&mut g, &mut ctx, KEY_HIT_LEFT);
+        assert_eq!(g.state, GameState::Countdown, "대기에서 시작이 안 됐습니다");
 
-        for mode in [VibrationMode::DutyRatio, VibrationMode::BlinkPeriod] {
-            // 레벨 0 은 꺼짐이라 켜고 꺼짐을 볼 수 없습니다.
-            for level in 1..=MAX_VIBRATION_LEVEL {
-                game.vibration_mode = mode;
-                game.vibration_level = level;
+        // 연주 중 → 타격 (시작으로 가로채이면 안 됩니다)
+        let mut g = playing();
+        let t = g.left.notes[0];
+        g.now_s = t;
+        press(&mut g, &mut ctx, KEY_HIT_LEFT);
+        assert_eq!(g.state, GameState::Playing, "연주 중에 화면이 바뀌었습니다");
+        assert_eq!(g.left.next, 1, "연주 중에 타격이 먹지 않았습니다");
 
-                game.now_s = on_at - 0.002;
-                assert_eq!(
-                    game.vibration_fill_with(mode),
-                    Intensity::OFF,
-                    "{mode:?} 레벨 {level}: 예고 시작 전에는 꺼져 있어야 합니다"
-                );
+        // 오른쪽도 같은 규칙
+        let mut g = playing();
+        let t = g.right.notes[0];
+        g.now_s = t;
+        press(&mut g, &mut ctx, KEY_HIT_RIGHT);
+        assert_eq!(g.right.next, 1, "오른쪽 타격이 먹지 않았습니다");
 
-                game.now_s = on_at + 0.002;
+        // 결과 → 대기
+        let mut g = game();
+        g.state = GameState::Result;
+        press(&mut g, &mut ctx, KEY_HIT_RIGHT);
+        assert_eq!(g.state, GameState::Standby, "결과에서 대기로 못 돌아갔습니다");
+    }
+
+    /// 대기 화면 전용 키들이 타격 키에 가려지지 않아야 합니다.
+    ///
+    /// `on_update` 가 타격 키를 먼저 검사하므로, 자리가 겹치면 뒤엣것이 영영 안 불립니다.
+    /// 빌드 타임 `_NO_KEY_CONFLICT` 와 짝이 되는 실행 검사입니다.
+    #[test]
+    fn standby_keys_are_not_shadowed_by_the_hit_keys() {
+        let mut ctx = Context::new();
+
+        // 곡 변경 키를 눌러도 연주가 시작되면 안 됩니다.
+        for key in [KEY_SONG_NEXT, KEY_PRESET_NEXT] {
+            let mut g = game();
+            press(&mut g, &mut ctx, key);
+            assert_eq!(
+                g.state,
+                GameState::Standby,
+                "{:?}/{:?} 가 타격 키에 가려져 연주가 시작됐습니다",
+                key.code,
+                key.side
+            );
+        }
+
+        // 모드·프리셋 키도 마찬가지입니다.
+        let mut g = game();
+        press(&mut g, &mut ctx, KEY_MODE);
+        assert_eq!(g.state, GameState::Standby);
+        assert_eq!(g.play_mode, PlayMode::Listen, "모드 키가 먹히지 않았습니다");
+    }
+
+    /// 연주 중에는 안내 음성이 나오면 안 됩니다.
+    /// 카운트다운 직후에 끼어들어 "삼 이 일 연주 중입니다" 가 되어 버립니다.
+    #[test]
+    fn nothing_is_spoken_while_playing() {
+        let ctx = Context::new();
+        let mut g = game();
+        g.state = GameState::Playing;
+        assert!(
+            matches!(g.on_speech(&ctx), SpeechResult::None),
+            "연주 중에 말을 겁니다"
+        );
+
+        // 카운트다운 중에도 조용해야 합니다.
+        g.state = GameState::Countdown;
+        assert!(matches!(g.on_speech(&ctx), SpeechResult::None));
+
+        // 대기·결과 화면은 반대로 말을 해야 합니다.
+        g.state = GameState::Standby;
+        assert!(!matches!(g.on_speech(&ctx), SpeechResult::None));
+        g.state = GameState::Result;
+        assert!(!matches!(g.on_speech(&ctx), SpeechResult::None));
+    }
+
+    /// 미리듣기는 **낮은 음량**으로 나가야 합니다.
+    ///
+    /// `context.audio.play()` 는 시스템 음량을 쓰므로 쓸 수 없고,
+    /// audio-service 의 `?volume=` 를 직접 실어 보냅니다. 값이 빠지면
+    /// 서버 기본값 1.0 이 되어 곡이 **원래 크기로** 터져 나옵니다.
+    #[test]
+    fn the_preview_carries_a_quiet_volume() {
+        for v in [MUSIC_VOLUME, PREVIEW_VOLUME] {
+            let url = TactileRhythm::sound_url(v);
+            assert!(url.starts_with(SOUND_URL), "주소가 /sound 가 아닙니다: {url}");
+            assert!(
+                url.contains(&format!("volume={v}")),
+                "음량이 주소에 실리지 않았습니다: {url}"
+            );
+        }
+
+        // 미리듣기는 본 연주보다 작아야 합니다.
+        assert!(
+            PREVIEW_VOLUME < MUSIC_VOLUME,
+            "미리듣기({PREVIEW_VOLUME})가 연주({MUSIC_VOLUME})보다 큽니다"
+        );
+        assert!((0.0..=1.0).contains(&PREVIEW_VOLUME));
+        assert!((0.0..=1.0).contains(&MUSIC_VOLUME));
+
+        // 연주는 트랙 음량을 줄이지 않아야 합니다.
+        // 기기 설정(마스터)이 그 위에 적용되므로, 여기서 또 줄이면 제곱으로 작아집니다.
+        assert_eq!(MUSIC_VOLUME, 1.0, "연주 트랙 음량은 1.0 이어야 합니다");
+    }
+
+    /// 곡을 넘기면 선택이 바뀌고, 곡이 없을 때 미리듣기가 터지지 않아야 합니다.
+    #[test]
+    fn changing_the_song_is_safe_without_songs() {
+        let mut ctx = Context::new();
+        let mut g = game();
+        let before = g.selected;
+        press(&mut g, &mut ctx, KEY_SONG_NEXT);
+        assert_ne!(g.selected, before, "곡이 안 넘어갔습니다");
+
+        // 곡 목록이 비어 있어도 조용히 넘어가야 합니다.
+        let mut empty = TactileRhythm::default();
+        empty.play_preview(&mut ctx);
+        assert!(empty.preview_request.is_none());
+    }
+
+    // --- 화면 ---------------------------------------------------------------
+
+    /// 연주 중에는 두 원 말고 아무것도 그리지 않아야 합니다.
+    /// 작은 장식이 따로 바뀌면 짧은 차이 전송이 끼어들어 67ms 고정이 깨집니다.
+    #[test]
+    fn nothing_but_the_two_circles_is_drawn_while_playing() {
+        let mut g = playing();
+        g.visual = Visual { left: 0, right: 0 };
+        assert_eq!(lit_pins(&g), 0, "진동이 없으면 아무것도 뜨면 안 됩니다");
+    }
+
+    /// 대기 화면은 **쉬고 → 예고 패턴 한 번 → 쉬고** 를 반복해야 합니다.
+    /// 쉼 없이 이어 붙이면 두 단계가 구분되지 않습니다.
+    #[test]
+    fn standby_plays_the_cue_pattern_with_a_rest_between_repeats() {
+        let mut g = game();
+        g.play_mode = PlayMode::Rhythm;
+        g.preset_rhythm = 2; // [1, 5, 7]
+        let cue = g.cue_s();
+        let pause = STANDBY_PAUSE_MS as f32 / 1000.0;
+        let pre = PRE_SEND_MS as f32 / 1000.0;
+        let cycle = pause + cue;
+
+        let at = |g: &mut TactileRhythm, t: f32| {
+            g.wall_s = t;
+            g.compute_visual().left
+        };
+
+        // 쉬는 구간 — 아무것도 안 나갑니다.
+        assert_eq!(at(&mut g, 0.0), 0, "주기 시작은 쉬는 구간입니다");
+        assert_eq!(at(&mut g, pause - pre - 0.01), 0, "아직 쉬는 중이어야 합니다");
+
+        // 1단계는 전송 시간만큼 앞당겨 나갑니다.
+        assert_eq!(at(&mut g, pause - pre + 0.01), 1, "1단계가 미리 나가야 합니다");
+        // 2단계도 같은 규칙.
+        assert_eq!(at(&mut g, pause + cue / 2.0 - pre + 0.01), 5, "2단계");
+        // 노트 시각(= 주기 끝)에 꺼집니다. 끄기는 앞당기지 않습니다.
+        assert_eq!(at(&mut g, cycle - 0.01), 5, "끄기를 미리 보내면 안 됩니다");
+
+        // 다음 주기도 같은 모양으로 되풀이됩니다.
+        assert_eq!(at(&mut g, cycle + 0.01), 0, "다음 주기는 다시 쉬는 구간");
+        assert_eq!(at(&mut g, cycle * 3.0 + pause - pre + 0.01), 1);
+
+        // HOLDING 은 대기 화면에 나오지 않습니다.
+        let holding = RHYTHM_PRESETS[2][2];
+        for i in 0..200 {
+            let t = cycle * i as f32 / 100.0;
+            assert_ne!(at(&mut g, t), holding, "HOLDING 이 대기 화면에 나왔습니다 (t={t})");
+        }
+
+        // 한 주기에서 쉬는 비중이 절반을 넘어야 "패턴"으로 느껴집니다.
+        let lit = (0..1000)
+            .filter(|i| at(&mut g, cycle * *i as f32 / 1000.0) != 0)
+            .count();
+        assert!(lit < 500, "쉬는 시간이 너무 짧습니다: 켜진 비율 {}%", lit / 10);
+    }
+
+    /// 감상 모드도 같은 방식으로 두 단계를 보여 줍니다.
+    #[test]
+    fn standby_previews_listening_mode_too() {
+        let mut g = game();
+        g.play_mode = PlayMode::Listen;
+        g.preset_listen = 1; // [6, 2]
+        let cue = g.cue_s();
+        let pause = STANDBY_PAUSE_MS as f32 / 1000.0;
+        let pre = PRE_SEND_MS as f32 / 1000.0;
+
+        g.wall_s = pause - pre + 0.01;
+        assert_eq!(g.compute_visual(), Visual { left: 6, right: 6 });
+        g.wall_s = pause + cue / 2.0 - pre + 0.01;
+        assert_eq!(g.compute_visual(), Visual { left: 2, right: 2 });
+    }
+
+    /// 연주가 시작되기 전(시계가 안 풀린 상태)에는 진동이 나가면 안 됩니다.
+    #[test]
+    fn no_vibration_before_the_music_actually_starts() {
+        let mut g = game();
+        g.state = GameState::Playing;
+        g.sync_locked = false;
+        g.now_s = 0.0;
+        assert_eq!(g.code_for(Side::Left), 0);
+        assert_eq!(g.code_for(Side::Right), 0);
+    }
+}
+
+#[cfg(test)]
+mod song_assets_check {
+    use super::*;
+
+    /// 곡마다 **자기 음원과 자기 채보**가 물려 있어야 합니다.
+    ///
+    /// `SONG_ASSETS` 에 줄을 복사해 넣다 보면 `include_bytes!` 만 그대로 두기 쉽습니다.
+    /// 그러면 채보는 B 곡인데 음악은 A 곡이 나오고, 오류는 안 납니다.
+    #[test]
+    fn every_song_has_its_own_audio_and_chart() {
+        let songs = load_songs();
+        assert_eq!(songs.len(), SONG_ASSETS.len(), "채보 파싱에 실패한 곡이 있습니다");
+
+        for (i, a) in SONG_ASSETS.iter().enumerate() {
+            for (j, b) in SONG_ASSETS.iter().enumerate() {
+                if i >= j {
+                    continue;
+                }
                 assert!(
-                    game.vibration_fill_with(mode).value > 0,
-                    "{mode:?} 레벨 {level}: 예고가 시작되면 켜져야 합니다"
+                    !std::ptr::eq(a.audio, b.audio),
+                    "{} 와 {} 가 같은 음원을 가리킵니다",
+                    a.title[1],
+                    b.title[1]
                 );
-
-                game.now_s = target + 0.002;
-                assert_eq!(
-                    game.vibration_fill_with(mode),
-                    Intensity::OFF,
-                    "{mode:?} 레벨 {level}: 노트를 지나면 꺼져야 합니다"
+                assert!(
+                    !std::ptr::eq(a.chart_json, b.chart_json),
+                    "{} 와 {} 가 같은 채보를 가리킵니다",
+                    a.title[1],
+                    b.title[1]
                 );
             }
         }
-    }
 
-    /// 듀티비 모드는 단계와 무관하게 창이 예고 그대로여야 합니다.
-    #[test]
-    fn duty_mode_never_widens_the_window() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-
-        // 레벨 0 은 꺼짐이라 켜고 꺼짐을 볼 수 없습니다. 1단계부터 봅니다.
-        for level in 1..=MAX_VIBRATION_LEVEL {
-            game.vibration_level = level;
-            game.now_s = target - lead - CUE_ADVANCE_S - 0.01;
-            assert_eq!(
-                game.vibration_fill_with(VibrationMode::DutyRatio),
-                Intensity::OFF,
-                "{level}단계: 예고 시작 전에는 꺼져 있어야 합니다"
+        // 음원 길이와 마지막 노트가 얼추 맞는지 — 엉뚱한 음원이 물리면 여기서 걸립니다.
+        for (song, asset) in songs.iter().zip(SONG_ASSETS) {
+            let last = song
+                .left_notes
+                .last()
+                .copied()
+                .unwrap_or(0.0)
+                .max(song.right_notes.last().copied().unwrap_or(0.0));
+            let secs = song.audio_secs.expect("mp3 길이를 읽지 못했습니다");
+            println!(
+                "{:<16} 음원 {:>6.1}초, 마지막 노트 {:>6.1}초",
+                asset.title[1], secs, last
             );
-            game.now_s = target - lead - CUE_ADVANCE_S + 0.01;
             assert!(
-                game.vibration_fill_with(VibrationMode::DutyRatio).value > 0,
-                "{level}단계: 예고 시작 후에는 켜져 있어야 합니다"
+                last <= secs + 1.0,
+                "{}: 마지막 노트({last:.1}초)가 음원({secs:.1}초)보다 뒤입니다 — 음원이 잘못 물렸을 수 있습니다",
+                asset.title[1]
             );
         }
-    }
-
-    /// 점멸 주기 모드는 같은 단계를 깜빡임 플래그로 내보내야 합니다.
-    /// 단계가 올라가면 강도값도 단조 증가합니다.
-    #[test]
-    fn blink_period_mode_maps_each_level_to_a_blink_rate() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        game.now_s = target - game.lead();
-
-        let mut values = Vec::new();
-        for level in MIN_VIBRATION_LEVEL..=MAX_VIBRATION_LEVEL {
-            game.vibration_level = level;
-            let fill = game.vibration_fill_with(VibrationMode::BlinkPeriod);
-            assert!(fill.blink, "점멸 모드는 깜빡임 플래그를 써야 합니다");
-            values.push(fill.value);
-        }
-
-        assert_eq!(values.len(), 8, "레벨 0~7 여덟 개여야 합니다");
-        assert_eq!(*values.last().unwrap(), 255, "레벨 7 은 최대여야 합니다");
-        assert!(
-            values.windows(2).all(|w| w[0] < w[1]),
-            "단계가 올라가면 강도값도 올라가야 합니다: {values:?}"
-        );
-
-        // 듀티비 모드는 같은 단계를 깜빡임 없이 냅니다.
-        let duty = game.vibration_fill_with(VibrationMode::DutyRatio);
-        assert!(!duty.blink, "듀티비 모드는 깜빡임 플래그를 쓰지 않아야 합니다");
-        assert_eq!(duty.value, *values.last().unwrap(), "같은 단계는 같은 강도값");
-    }
-
-    #[test]
-    fn hit_windows_and_miss() {
-        let mut game = loaded_game();
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-
-        // 정확히 맞춤 → Perfect
-        game.now_s = target;
-        game.on_hit();
-        assert_eq!(game.perfect, 1);
-        assert_eq!(game.combo, 1);
-        assert_eq!(game.next_note, 1);
-
-        // 두 번째 노트를 조금 늦게 → Good
-        let second = game.song().unwrap().notes[1];
-        let perfect_tol = Judge::Perfect.tolerance().unwrap();
-        let good_tol = Judge::Good.tolerance().unwrap();
-        game.now_s = second + (perfect_tol + good_tol) / 2.0;
-        game.on_hit();
-        assert_eq!(game.good, 1);
-        assert_eq!(game.combo, 2);
-
-        // 세 번째 노트는 그냥 흘려보냄 → Miss, 콤보 초기화
-        let third = game.song().unwrap().notes[2];
-        game.now_s = third + HIT_WINDOW_S + 0.01;
-        game.reap_missed_notes();
-        assert_eq!(game.miss, 1);
-        assert_eq!(game.combo, 0);
-        assert_eq!(game.max_combo, 2);
-    }
-
-    /// `cargo test -p rhythm-game -- --nocapture snapshot` 으로 화면을 눈으로 확인합니다.
-    fn render_ascii(game: &RhythmGame, size: Size) -> String {
-        let mut canvas = Canvas::new(size);
-        game.on_draw(&mut canvas).expect("on_draw 실패");
-
-        let mut out = String::new();
-        for y in 0..size.height {
-            for x in 0..size.width {
-                let v = canvas.get_pin(Point::new(x, y)).value;
-                out.push(match v {
-                    0 => '.',
-                    1..=99 => '-',
-                    100..=199 => '+',
-                    _ => '#',
-                });
-            }
-            out.push('\n');
-        }
-        out
-    }
-
-    #[test]
-    fn snapshot_screens() {
-        let size = Size::new(48, 32);
-        let mut game = loaded_game();
-
-        println!("\n=== 곡 선택 ===\n{}", render_ascii(&game, size));
-
-        game.state = GameState::Playing;
-        let target = game.song().unwrap().notes[0];
-        let lead = game.lead();
-
-        // 진동이 켜져 있는 순간을 찾아서 찍습니다.
-        let mut t = target - lead;
-        while t < target && game.vibration_fill().value == 0 {
-            t += 0.002;
-            game.now_s = t;
-        }
-        game.visual = game.compute_visual(size.width);
-        println!(
-            "=== 연주 중 (노트 {:.3}s, 현재 {:.3}s, 진동 켜짐) ===\n{}",
-            target,
-            game.now_s,
-            render_ascii(&game, size)
-        );
-
-        // 원 테두리는 어느 화면에서나 보여야 합니다.
-        let frame = render_ascii(&game, size);
-        assert!(
-            frame.chars().filter(|&c| c != '.' && c != '\n').count() > 20,
-            "원이 그려지지 않았습니다"
-        );
     }
 }

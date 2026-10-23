@@ -7,15 +7,18 @@
 //! 한 회차의 시간축
 //!
 //! ```text
-//!   t-(200+전송)        t-(100+전송)          t                t + 응답 허용
-//!   ─────┬───────────────────┬─────────────────┬─────────────────┬──────────
-//!        │◀── 1단계 진동 ──▶│◀── 2단계 진동 ─▶│                 │
-//!        │◀──────────────── 키 입력 기록 구간 ─────────────────────▶│
+//!   t-(250+전송)        t-(125+전송)          t              t+500        t + 응답 허용
+//!   ─────┬───────────────────┬─────────────────┬────────────────┬─────────────┬──────
+//!        │◀── 1단계 진동 ──▶│◀── 2단계 진동 ─▶│◀─ 홀딩(선택) ─▶│             │
+//!        │◀──────────────────── 키 입력 기록 구간 ───────────────────────────────▶│
 //! ```
+//!
+//! * 홀딩을 켜면 `t` 부터 `t + HOLD_MS` 까지 원을 `HOLD_CODES` 중 고른 코드로 유지하고, 키를 누르면 바로 끕니다.
+//!   대기 화면에서 왼쪽 메뉴 키(웹 시뮬레이터의 `Q`)를 누를 때마다 끔 → 15 → 1 → 끔 으로 돕니다.
 //!
 //! * 단계별 시각은 `STAGE_LEADS_MS`, 세기(4비트 코드 0~15) 조합은 `CODE_PRESETS` 표로 정합니다.
 //! * 대기 화면에서 ←/→ 로 조합을 고르고 Fn 으로 역순을 고르면, 그 조합이 반복 재생되고 실험에 쓰입니다.
-//! * 마지막 단계는 `t` 에 꺼집니다. 그 사이에 키를 눌러도 `t` 까지 유지합니다.
+//! * 홀딩이 꺼져 있으면 마지막 단계는 `t` 에 꺼집니다. 그 사이에 키를 눌러도 `t` 까지 유지합니다.
 //! * 전송 시간은 각 단계에서 바뀌는 핀 수로 계산합니다(`stage_tx_ms`).
 //! * 1단계가 켜지기 전에 누른 것은 느끼고 친 것이 아니므로 무시합니다.
 //! * `t + RESPONSE_WINDOW_MS` 까지 누르지 않으면 미응답(miss)으로 기록합니다.
@@ -52,8 +55,8 @@ const CUE_DIAMETER: i16 = 22;
 ///
 /// 뒤 단계일수록 작아야 하며, 마지막 단계는 `t` 에 꺼집니다.
 const STAGE_LEADS_MS: [f64; 2] = [
-    200.0, // 1단계: t - (200ms + 전송) 부터
-    100.0, // 2단계: t - (100ms + 전송) 부터 t 까지
+    220.0, // 1단계: t - (250ms + 전송) 부터 125ms 동안
+    110.0, // 2단계: t - (125ms + 전송) 부터 t 까지 125ms 동안
 ];
 
 const STAGE_COUNT: usize = STAGE_LEADS_MS.len();
@@ -74,7 +77,7 @@ const STAGE_COUNT: usize = STAGE_LEADS_MS.len();
 ///
 /// 9~14 는 전체 프레임 전송일 때만 점멸로 해석됩니다. 지름 22 원(384핀)은
 /// 바꿀 때마다 전체 프레임으로 나가므로 그대로 쓸 수 있습니다.
-/// 점멸은 펌웨어가 절대 시각 기준으로 위상을 잡으므로, 반주기가 단계 길이(약 100ms)보다
+/// 점멸은 펌웨어가 절대 시각 기준으로 위상을 잡으므로, 반주기가 단계 길이(125ms)보다
 /// 긴 코드 9~11 은 한 번도 안 바뀌고 통째로 켜지거나 꺼질 수 있습니다.
 const CODE_PRESETS: [[u8; STAGE_COUNT]; 12] = [
     [13, 14],
@@ -88,15 +91,35 @@ const CODE_PRESETS: [[u8; STAGE_COUNT]; 12] = [
     [3, 6],
     [3, 7],
     [4, 6],
-    [4, 7]
+    [4, 7],
 ];
 
 /// 대기 화면에서 조합을 반복해서 보여 줄 때, 한 번 끝나고 다음 진동까지 쉬는 시간(ms)
 const DEMO_PAUSE_MS: f64 = 1_000.0;
 
+/// 홀딩 시간(ms). 홀딩을 켜면 `t` 부터 이 시간 동안 원을 고른 홀딩 코드로 유지합니다.
+/// 그 사이에 키(왼쪽 가운데 키)를 누르면 바로 꺼집니다.
+///
+/// 단계와 마찬가지로 전송 시간만큼 미리 보내, 손끝에는 `[t, t + HOLD_MS)` 동안 닿게 합니다.
+const HOLD_MS: f64 = 500.0;
+
+/// 홀딩 동안 쓸 코드 후보 (0~15, `CODE_PRESETS` 의 표 참고).
+///
+/// 대기 화면에서 왼쪽 메뉴 키(웹 시뮬레이터의 `Q`)를 누를 때마다
+/// 끔 → 15(항상 켜짐) → 1(듀티 12.5% 진동) → 끔 순서로 돕니다. 줄을 더 넣어도 됩니다.
+const HOLD_CODES: [u8; 2] = [15, 2];
+
+/// `cue_stage` 에서 홀딩을 가리키는 번호. 단계 번호(0..STAGE_COUNT) 바로 다음입니다.
+const HOLD: usize = STAGE_COUNT;
+
 const _: () = {
     assert!(STAGE_COUNT > 0, "단계가 하나 이상 있어야 합니다");
     assert!(CODE_PRESETS.len() > 0, "조합이 하나 이상 있어야 합니다");
+    let mut h = 0;
+    while h < HOLD_CODES.len() {
+        assert!(HOLD_CODES[h] <= 15, "HOLD_CODES 는 0~15 입니다");
+        h += 1;
+    }
     let mut i = 1;
     while i < STAGE_COUNT {
         assert!(
@@ -193,6 +216,21 @@ fn stage_tx_ms(display: Size, codes: [u8; STAGE_COUNT]) -> [f64; STAGE_COUNT] {
     })
 }
 
+/// 홀딩을 켤 때와 끌 때의 전송 시간(ms).
+///
+/// 켤 때는 마지막 단계 코드에서 `hold_code` 로, 끌 때는 `hold_code` 에서 꺼짐(0)으로 바뀝니다.
+/// 코드가 같으면 보낼 것이 없으므로 0ms 입니다.
+fn hold_tx_ms(display: Size, last_stage_code: u8, hold_code: u8) -> (f64, f64) {
+    let full = transmission_ms(cue_pin_count(), display);
+    let on = if hold_code != last_stage_code {
+        full
+    } else {
+        0.0
+    };
+    let off = if hold_code != 0 { full } else { 0.0 };
+    (on, off)
+}
+
 /// 핀 `changed_pins` 개를 바꾸는 프레임이 ESP32 까지 가는 데 걸리는 시간(ms).
 ///
 /// 런타임(`runtime-native/src/hal/display/braille_display.rs`)과 같은 규칙을 씁니다.
@@ -239,10 +277,10 @@ impl Rng {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
-    /// 안내 화면. 가운데 키로 시작합니다.
+    /// 안내(미리보기) 화면. 왼쪽 위 키(웹 시뮬레이터의 W)로 시작합니다.
     Ready,
     Running,
-    /// 20회 완료. 가운데 키로 다시 시작합니다.
+    /// 20회 완료. 왼쪽 위 키(W)로 다시 시작합니다.
     Done,
 }
 
@@ -270,6 +308,8 @@ impl TrialRecord {
 struct PendingTrial {
     target: Duration,
     stage_on: [Duration; STAGE_COUNT],
+    /// 홀딩을 켜고 끌 시각(전송 시간만큼 앞당긴 값). 홀딩이 꺼져 있으면 `None`.
+    hold: Option<(Duration, Duration)>,
     press: Option<Duration>,
 }
 
@@ -279,8 +319,20 @@ impl PendingTrial {
         self.stage_on[0]
     }
 
-    /// `now` 에 켜져 있어야 할 단계. `[1단계 시작, t)` 밖이면 `None`.
+    /// `now` 에 켜져 있어야 할 단계(`HOLD` = 홀딩). 꺼져 있어야 하면 `None`.
     fn stage_at(&self, now: Duration) -> Option<usize> {
+        if let Some((hold_on, hold_off)) = self.hold
+            && now >= hold_on
+        {
+            match self.press {
+                // 아직 안 눌렀으면 홀딩 시간이 끝날 때까지 유지합니다.
+                None => return (now < hold_off).then_some(HOLD),
+                // 홀딩 중에 눌렀으면 바로 끕니다.
+                Some(p) if p >= hold_on => return None,
+                // t 전에 이미 눌렀으면 홀딩 없이 평소처럼 t 까지만 단계를 유지합니다.
+                Some(_) => {}
+            }
+        }
         if now >= self.target {
             return None;
         }
@@ -316,6 +368,12 @@ pub struct TactileExperiment {
     reversed: bool,
     /// 대기 화면에서 고른 조합을 반복 재생 중인지, 그렇다면 언제부터인지
     demo_since: Option<Duration>,
+    /// 미리보기 중 마지막으로 Space(왼쪽 가운데 키)를 누른 시각. 홀딩을 끄는 연습용입니다.
+    demo_press: Option<Duration>,
+    /// 홀딩 상태. 0 = 끔, `i` (1 이상) = `HOLD_CODES[i - 1]` 로 홀딩. 왼쪽 메뉴 키로 돕니다.
+    hold_mode: usize,
+    /// 홀딩을 켜고 끌 때의 전송 시간(ms)
+    hold_tx: (f64, f64),
 }
 
 impl Default for TactileExperiment {
@@ -333,6 +391,9 @@ impl Default for TactileExperiment {
             preset: 0,
             reversed: false,
             demo_since: None,
+            demo_press: None,
+            hold_mode: 0,
+            hold_tx: (0.0, 0.0),
         }
     }
 }
@@ -341,7 +402,31 @@ impl TactileExperiment {
     /// 화면 크기에 맞춰 전송 시간을 다시 계산합니다.
     fn set_display_size(&mut self, size: Size) {
         self.display = size;
-        self.tx_ms = stage_tx_ms(size, self.codes());
+        self.recompute_tx();
+    }
+
+    /// 화면 크기나 조합이 바뀌면 단계·홀딩의 전송 시간을 다시 계산합니다.
+    fn recompute_tx(&mut self) {
+        let codes = self.codes();
+        self.tx_ms = stage_tx_ms(self.display, codes);
+        self.hold_tx = match self.hold_code() {
+            Some(hold) => hold_tx_ms(self.display, codes[STAGE_COUNT - 1], hold),
+            None => (0.0, 0.0),
+        };
+    }
+
+    /// 지금 고른 홀딩 코드. 홀딩이 꺼져 있으면 `None`.
+    fn hold_code(&self) -> Option<u8> {
+        self.hold_mode.checked_sub(1).map(|i| HOLD_CODES[i])
+    }
+
+    /// `cue_stage` 번호(단계 또는 `HOLD`)에 해당하는 코드
+    fn cue_code(&self, stage: usize) -> u8 {
+        if stage == HOLD {
+            self.hold_code().unwrap_or(0)
+        } else {
+            self.codes()[stage]
+        }
     }
 
     /// 지금 고른 조합의 단계별 코드
@@ -371,6 +456,13 @@ impl TactileExperiment {
                     self.codes()[i]
                 )
             })
+            .chain(std::iter::once(match self.hold_code() {
+                Some(hold) => format!(
+                    "hold:t-tx{:.1}..t+{}-tx{:.1}:code{hold}",
+                    self.hold_tx.0, HOLD_MS, self.hold_tx.1
+                ),
+                None => "hold:off".to_string(),
+            }))
             .collect::<Vec<_>>()
             .join("|")
     }
@@ -394,16 +486,28 @@ impl TactileExperiment {
     /// 지금부터 무작위 간격 뒤에 1단계가 켜지도록 다음 회차를 잡습니다.
     fn schedule_next(&mut self, now: Duration) {
         let gap = Duration::from_millis(self.rng.range(GAP_MIN_MS, GAP_MAX_MS));
-        let first_advance = Duration::from_secs_f64(self.stage_advance_ms(0) / 1000.0);
-        let target = now + gap + first_advance;
+        let target = now + gap + ms_to_duration(self.stage_advance_ms(0));
+        self.current = Some(self.make_trial(target));
+    }
+
+    /// 목표 시각 `t` 에 맞춰 단계·홀딩 시각을 잡은 회차를 만듭니다.
+    fn make_trial(&self, target: Duration) -> PendingTrial {
         let stage_on = std::array::from_fn(|i| {
-            target.saturating_sub(Duration::from_secs_f64(self.stage_advance_ms(i) / 1000.0))
+            target.saturating_sub(ms_to_duration(self.stage_advance_ms(i)))
         });
-        self.current = Some(PendingTrial {
+        let hold = self.hold_code().map(|_| {
+            let (on_tx, off_tx) = self.hold_tx;
+            (
+                target.saturating_sub(ms_to_duration(on_tx)),
+                target + ms_to_duration(HOLD_MS - off_tx),
+            )
+        });
+        PendingTrial {
             target,
             stage_on,
+            hold,
             press: None,
-        });
+        }
     }
 
     /// 왼쪽 가운데 키 입력. 기록되면 `true`.
@@ -443,11 +547,12 @@ impl TactileExperiment {
         if stage != self.cue_stage
             && let Some(i) = stage
         {
-            log::debug!(
-                "{}단계 시작 (t 까지 {:.1}ms)",
-                i + 1,
-                (trial.target - now).as_secs_f64() * 1000.0
-            );
+            let to_t = (trial.target.as_secs_f64() - now.as_secs_f64()) * 1000.0;
+            if i == HOLD {
+                log::debug!("홀딩 시작 (t 까지 {to_t:.1}ms)");
+            } else {
+                log::debug!("{}단계 시작 (t 까지 {to_t:.1}ms)", i + 1);
+            }
         }
         self.cue_stage = stage;
 
@@ -493,9 +598,23 @@ impl TactileExperiment {
         self.preset_label(lang)
     }
 
+    /// 왼쪽 메뉴 키(웹 시뮬레이터의 Q): 홀딩을 끔 → `HOLD_CODES` 차례 → 끔 으로 돌립니다.
+    /// 음성 안내 문구를 돌려줍니다.
+    fn toggle_holding(&mut self, now: Duration, lang: Language) -> String {
+        self.hold_mode = (self.hold_mode + 1) % (HOLD_CODES.len() + 1);
+        self.apply_codes(now);
+        let secs = HOLD_MS / 1000.0;
+        match (self.hold_code(), lang == Language::Ko) {
+            (Some(code), true) => format!("홀딩 {code}, {secs}초"),
+            (None, true) => "홀딩 끔".to_string(),
+            (Some(code), false) => format!("Holding {code}, {secs} seconds"),
+            (None, false) => "Holding off".to_string(),
+        }
+    }
+
     /// 조합이 바뀌면 전송 시간이 달라지므로 다시 계산하고, 반복 재생을 처음부터 시작합니다.
     fn apply_codes(&mut self, now: Duration) {
-        self.tx_ms = stage_tx_ms(self.display, self.codes());
+        self.recompute_tx();
         self.demo_since = Some(now);
         log::info!(
             "조합 {}번{}: {}",
@@ -520,22 +639,27 @@ impl TactileExperiment {
 
     /// 대기 화면에서 지금 켜 둘 단계.
     ///
-    /// 조합을 고른 뒤로는 `DEMO_PAUSE_MS` 쉬고 → 실험과 똑같은 시간 배치로 단계를 켜고 → `t` 에 끄기를
-    /// 반복합니다. 한 번도 고르지 않았으면 진동하지 않습니다.
+    /// 조합이나 홀딩을 바꾼 뒤로는 `DEMO_PAUSE_MS` 쉬고 → 실험과 똑같은 시간 배치로 단계를 켜고 →
+    /// (홀딩이 켜져 있으면 `t + HOLD_MS` 까지 홀딩하고) → 끄기를 반복합니다.
+    /// 한 번도 바꾸지 않았으면 진동하지 않습니다.
+    ///
+    /// 이번 주기의 1단계가 켜진 뒤에 Space 를 눌렀으면 실험과 똑같이 반영합니다(홀딩이 바로 꺼짐).
     fn demo_stage(&self, now: Duration) -> Option<usize> {
         let since = self.demo_since?;
         let first = self.stage_advance_ms(0);
-        let cycle = DEMO_PAUSE_MS + first;
-        let pos = (now.saturating_sub(since).as_secs_f64() * 1000.0) % cycle;
-        // 이번 주기의 1단계 시작부터 지난 시간. 음수면 쉬는 중입니다.
-        let since_cue = pos - DEMO_PAUSE_MS;
-        if since_cue < 0.0 {
-            return None;
-        }
-        // 단계 i 는 1단계 시작 후 (first - advance_i) 에 켜집니다.
-        (0..STAGE_COUNT)
-            .rev()
-            .find(|&i| since_cue >= first - self.stage_advance_ms(i))
+        let tail = if self.hold_code().is_some() {
+            HOLD_MS
+        } else {
+            0.0
+        };
+        let cycle = DEMO_PAUSE_MS + first + tail;
+        let elapsed = now.saturating_sub(since).as_secs_f64() * 1000.0;
+        let cycle_start = (elapsed / cycle).floor() * cycle;
+        let target = since + ms_to_duration(cycle_start + DEMO_PAUSE_MS + first);
+        let mut trial = self.make_trial(target);
+        // 이전 주기나 쉬는 동안 누른 것은 실험처럼 무시합니다.
+        trial.press = self.demo_press.filter(|&p| p >= trial.cue_on());
+        trial.stage_at(now)
     }
 
     fn abort(&mut self) {
@@ -598,6 +722,11 @@ impl TactileExperiment {
             log::warn!("결과 저장 실패: {e:?}");
         }
     }
+}
+
+/// ms(실수)를 `Duration` 으로. 음수는 0 으로 둡니다.
+fn ms_to_duration(ms: f64) -> Duration {
+    Duration::from_secs_f64(ms.max(0.0) / 1000.0)
 }
 
 /// 나오고 있는 안내 음성을 끊습니다.
@@ -669,12 +798,26 @@ impl Applet for TactileExperiment {
                     self.abort();
                     needs_redraw = true;
                 }
-                (Phase::Ready | Phase::Done, KeyCode::Center, _) => {
+                // 미리보기에서 Space: 실험처럼 눌러 보기 (홀딩이 켜져 있으면 바로 꺼짐)
+                (Phase::Ready | Phase::Done, KeyCode::Center, KeypadSide::Left) => {
+                    self.demo_press = Some(now);
+                }
+                // 실전 시작: 왼쪽 위 키 (웹 시뮬레이터의 W)
+                (Phase::Ready | Phase::Done, KeyCode::Up, KeypadSide::Left) => {
                     stop_speech(context);
                     self.start(now, context.time.get_time_seconds());
                     self.save(context);
                     needs_redraw = true;
                 }
+                // 홀딩 전환: 왼쪽 메뉴 키 (웹 시뮬레이터의 Q)
+                (Phase::Ready | Phase::Done, KeyCode::Menu, KeypadSide::Left) => {
+                    let label = self.toggle_holding(now, context.language);
+                    context
+                        .audio
+                        .speak_text_with_option(&label, SpeechOption::forced());
+                    needs_redraw = true;
+                }
+                // 종료: 오른쪽 메뉴 키 (웹 시뮬레이터의 Delete)
                 (Phase::Ready | Phase::Done, KeyCode::Menu, _) => {
                     return Ok(UpdateResult::ExitApp);
                 }
@@ -724,13 +867,13 @@ impl Applet for TactileExperiment {
             // 단계가 바뀔 때 바뀌는 핀 수가 정확히 원의 핀 수가 됩니다(전송 시간 계산의 전제).
             Phase::Running => {
                 if let Some(i) = self.cue_stage {
-                    fill_disc(canvas, center, code_to_intensity(self.codes()[i]));
+                    fill_disc(canvas, center, code_to_intensity(self.cue_code(i)));
                 }
             }
             // 대기 화면: 조합을 고르기 전에는 손가락 놓을 자리(테두리)를,
             // 고른 뒤에는 실험과 똑같이 빈 화면에서 원만 켜고 끕니다(전송 시간이 같도록).
             Phase::Ready | Phase::Done => match (self.cue_stage, self.demo_since) {
-                (Some(i), _) => fill_disc(canvas, center, code_to_intensity(self.codes()[i])),
+                (Some(i), _) => fill_disc(canvas, center, code_to_intensity(self.cue_code(i))),
                 (None, None) => outline_disc(canvas, center),
                 (None, Some(_)) => {}
             },
@@ -742,9 +885,9 @@ impl Applet for TactileExperiment {
         let ko = context.language == Language::Ko;
         match self.phase {
             Phase::Ready => SpeechResult::text(if ko {
-                "촉각 실험. 가운데 원에 손가락을 올리세요. 원이 떨리다가 멈추는 순간 왼쪽 가운데 키를 누르세요. 좌우 키로 진동 조합을 고르면 반복해서 느껴 볼 수 있고, 기능 키로 순서를 뒤집습니다. 시작하려면 가운데 키를 누르세요."
+                "촉각 실험. 가운데 원에 손가락을 올리세요. 원이 떨리다가 멈추는 순간 왼쪽 가운데 키를 누르세요. 좌우 키로 진동 조합을 고르면 반복해서 느껴 볼 수 있고, 기능 키로 순서를 뒤집습니다. 왼쪽 메뉴 키를 누를 때마다 홀딩이 끔, 15, 1 순서로 바뀝니다. 미리보기 중에도 왼쪽 가운데 키로 눌러 볼 수 있습니다. 실험을 시작하려면 왼쪽 위 키, 종료는 오른쪽 메뉴 키입니다."
             } else {
-                "Tactile experiment. Rest a finger on the circle. Press the left center key the moment the vibration stops. Left and right pick a vibration preset and repeat it; the function key reverses it. Press center to begin."
+                "Tactile experiment. Rest a finger on the circle. Press the left center key the moment the vibration stops. Left and right pick a vibration preset and repeat it; the function key reverses it. The left menu key cycles holding: off, 15, 1. You can practice pressing the left center key during the preview. Press left up to begin the experiment, right menu to exit."
             }),
             Phase::Running => SpeechResult::None,
             Phase::Done => {
@@ -753,11 +896,11 @@ impl Applet for TactileExperiment {
                 let mean_abs = self.mean_abs_diff_ms().unwrap_or(0.0).round() as i64;
                 SpeechResult::text(if ko {
                     format!(
-                        "실험 완료. {TRIAL_COUNT}회 중 {answered}회 응답. 평균 차이 {mean}밀리초, 평균 절대 차이 {mean_abs}밀리초. 결과는 PC에서 받아갈 수 있습니다. 다시 하려면 가운데 키를 누르세요."
+                        "실험 완료. {TRIAL_COUNT}회 중 {answered}회 응답. 평균 차이 {mean}밀리초, 평균 절대 차이 {mean_abs}밀리초. 결과는 PC에서 받아갈 수 있습니다. 다시 하려면 왼쪽 위 키를 누르세요."
                     )
                 } else {
                     format!(
-                        "Done. {answered} of {TRIAL_COUNT} answered. Mean difference {mean} milliseconds, mean absolute {mean_abs}. Results can be read from a PC. Press center to run again."
+                        "Done. {answered} of {TRIAL_COUNT} answered. Mean difference {mean} milliseconds, mean absolute {mean_abs}. Results can be read from a PC. Press left up to run again."
                     )
                 })
             }
@@ -766,11 +909,11 @@ impl Applet for TactileExperiment {
 
     fn on_help(&self, _context: &Context) -> LocalizedString {
         LocalizedString {
-            ko: "촉각 반응 실험입니다. 가운데 원이 떨리기 시작하고 약 0.2초 뒤에 멈춥니다. 멈추는 순간에 왼쪽 가운데 키를 누르세요. 20회 반복하며, 누른 시각과 멈춘 시각의 차이가 기록됩니다. 대기 화면에서 좌우 키로 1단계와 2단계 진동 조합을 고르면 실험과 같은 모양으로 반복해서 느껴 볼 수 있고, 기능 키로 순서를 뒤집을 수 있습니다. 고른 조합이 실험에 쓰입니다. 가운데 키로 시작하고, 메뉴 키로 중단하거나 종료합니다. 결과는 PC에 USB로 연결한 뒤 device-info experiment 명령으로 받아갈 수 있습니다."
+            ko: "촉각 반응 실험입니다. 가운데 원이 떨리기 시작하고 약 0.25초 뒤에 멈춥니다. 멈추는 순간에 왼쪽 가운데 키를 누르세요. 20회 반복하며, 누른 시각과 멈춘 시각의 차이가 기록됩니다. 대기 화면에서 좌우 키로 1단계와 2단계 진동 조합을 고르면 실험과 같은 모양으로 반복해서 느껴 볼 수 있고, 기능 키로 순서를 뒤집을 수 있습니다. 고른 조합이 실험에 쓰입니다. 왼쪽 메뉴 키를 누를 때마다 홀딩이 끔, 15(완전히 켜짐), 1(약한 진동) 순서로 바뀝니다. 홀딩이 켜져 있으면 멈춰야 할 순간부터 0.5초 동안 원이 그 코드로 유지되다가 키를 누르면 바로 꺼집니다. 미리보기 중에도 왼쪽 가운데 키로 눌러 볼 수 있습니다. 왼쪽 위 키로 실험을 시작하고, 실험 중에는 메뉴 키로 중단합니다. 대기 화면에서는 오른쪽 메뉴 키로 종료합니다. 결과는 PC에 USB로 연결한 뒤 device-info experiment 명령으로 받아갈 수 있습니다."
                 .to_string(),
-            en: "Tactile timing experiment. The center circle vibrates and stops about 0.2 seconds later. Press the left center key the moment it stops. Repeated 20 times; the difference between your press and the stop is recorded. On the waiting screen, left and right pick a two-stage vibration preset that then repeats exactly as in the experiment; the function key reverses its order. The chosen preset is used for the experiment. Center starts, menu stops or exits. Read the results from a PC over USB with the device-info experiment command."
+            en: "Tactile timing experiment. The center circle vibrates and stops about 0.25 seconds later. Press the left center key the moment it stops. Repeated 20 times; the difference between your press and the stop is recorded. On the waiting screen, left and right pick a two-stage vibration preset that then repeats exactly as in the experiment; the function key reverses its order. The chosen preset is used for the experiment. The left menu key cycles holding through off, code 15 (fully raised) and code 1 (light vibration): from the moment to press, the circle holds that code for 0.5 seconds and turns off as soon as you press. You can practice with the left center key during the preview. Left up starts the experiment; menu stops a run; on the waiting screen the right menu key exits. Read the results from a PC over USB with the device-info experiment command."
                 .to_string(),
-            ja: "触覚反応実験です。中央の円が振動し、約0.2秒後に止まります。止まった瞬間に左の中央キーを押してください。20回繰り返し、押した時刻と止まった時刻の差を記録します。中央キーで開始、メニューキーで中断または終了します。結果はPCからdevice-info experimentコマンドで取得できます。"
+            ja: "触覚反応実験です。中央の円が振動し、約0.25秒後に止まります。止まった瞬間に左の中央キーを押してください。20回繰り返し、押した時刻と止まった時刻の差を記録します。左メニューキーでホールド(押すべき瞬間から0.5秒間保持、押すと即停止)を切り替えます。プレビュー中も左中央キーで押す練習ができます。左上キーで実験開始、実験中はメニューキーで中断、待機画面では右メニューキーで終了します。結果はPCからdevice-info experimentコマンドで取得できます。"
                 .to_string(),
         }
     }
@@ -1012,6 +1155,149 @@ mod tests {
             e.apply_codes(ms(0));
             assert_eq!(e.tx_ms, stage_tx_ms(DISPLAY, e.codes()));
         }
+    }
+
+    fn running_with_hold() -> TactileExperiment {
+        let mut e = TactileExperiment::default();
+        e.set_display_size(DISPLAY);
+        e.toggle_holding(ms(0), Language::Ko);
+        assert_eq!(e.hold_code(), Some(HOLD_CODES[0]));
+        e.start(ms(1_000), 0);
+        e
+    }
+
+    #[test]
+    fn leads_are_250_and_125() {
+        assert_eq!(STAGE_LEADS_MS, [250.0, 125.0]);
+    }
+
+    #[test]
+    fn hold_runs_from_t_until_t_plus_500_without_a_press() {
+        let mut e = running_with_hold();
+        let trial = e.current.unwrap();
+        let (on, off) = trial.hold.unwrap();
+        // 전송 시간만큼 앞당겨 보내서, 손끝에는 [t, t + 500) 동안 닿습니다.
+        assert!((to_ms(trial.target - on) - e.hold_tx.0).abs() < 0.01);
+        assert!((to_ms(off - trial.target) - (HOLD_MS - e.hold_tx.1)).abs() < 0.01);
+
+        e.tick(on - ms(1));
+        assert_eq!(e.cue_stage, Some(STAGE_COUNT - 1));
+        e.tick(on);
+        assert_eq!(e.cue_stage, Some(HOLD));
+        assert_eq!(e.cue_code(HOLD), HOLD_CODES[0]);
+        e.tick(off - ms(1));
+        assert_eq!(e.cue_stage, Some(HOLD));
+        e.tick(off);
+        assert_eq!(e.cue_stage, None, "홀딩 시간이 끝나면 꺼집니다");
+        // 아직 응답 허용 시간 안이라 누르면 기록됩니다.
+        assert!(e.press(off + ms(10)));
+    }
+
+    #[test]
+    fn pressing_during_hold_turns_it_off() {
+        let mut e = running_with_hold();
+        let trial = e.current.unwrap();
+        let press_at = trial.target + ms(120);
+        e.tick(press_at);
+        assert_eq!(e.cue_stage, Some(HOLD));
+        assert!(e.press(press_at));
+        let rec = e.tick(press_at).unwrap();
+        assert!((rec.diff_ms().unwrap() - 120.0).abs() < 0.01);
+        assert_eq!(e.cue_stage, None, "누르면 바로 꺼집니다");
+    }
+
+    #[test]
+    fn pressing_before_t_skips_the_hold() {
+        let mut e = running_with_hold();
+        let trial = e.current.unwrap();
+        let (on, _) = trial.hold.unwrap();
+        let press_at = trial.cue_on() + ms(20);
+        e.tick(press_at);
+        assert!(e.press(press_at));
+        e.tick(on + ms(1));
+        assert_eq!(
+            e.cue_stage,
+            Some(STAGE_COUNT - 1),
+            "t 까지는 단계를 유지합니다"
+        );
+        e.tick(trial.target);
+        assert_eq!(e.cue_stage, None, "홀딩 없이 t 에 꺼집니다");
+    }
+
+    #[test]
+    fn hold_off_means_no_hold() {
+        let e = running();
+        assert!(e.current.unwrap().hold.is_none());
+        assert!(e.to_csv().contains("hold:off"));
+        let e = running_with_hold();
+        assert!(e.to_csv().contains(&format!("code{}", HOLD_CODES[0])));
+    }
+
+    #[test]
+    fn demo_includes_the_hold_when_enabled() {
+        let mut e = TactileExperiment::default();
+        e.set_display_size(DISPLAY);
+        let since = ms(10_000);
+        e.toggle_holding(since, Language::Ko);
+        let first = e.stage_advance_ms(0);
+        let cycle = DEMO_PAUSE_MS + first + HOLD_MS;
+        let at = |offset_ms: f64| since + Duration::from_secs_f64(offset_ms / 1000.0);
+
+        for c in 0..3 {
+            let t = c as f64 * cycle + DEMO_PAUSE_MS + first;
+            e.tick(at(t + 1.0));
+            assert_eq!(e.cue_stage, Some(HOLD), "{}주기 홀딩", c + 1);
+            e.tick(at(t + HOLD_MS - e.hold_tx.1 + 1.0));
+            assert_eq!(e.cue_stage, None, "{}주기 홀딩 끝", c + 1);
+        }
+    }
+
+    #[test]
+    fn q_cycles_off_15_1_off() {
+        let mut e = TactileExperiment::default();
+        e.set_display_size(DISPLAY);
+        assert_eq!(e.hold_code(), None);
+        assert_eq!(e.toggle_holding(ms(0), Language::Ko), "홀딩 15, 0.5초");
+        assert_eq!(e.hold_code(), Some(15));
+        assert_eq!(e.toggle_holding(ms(0), Language::Ko), "홀딩 1, 0.5초");
+        assert_eq!(e.hold_code(), Some(1));
+        assert_eq!(e.cue_code(HOLD), 1);
+        assert!(e.stages_summary().ends_with("code1"));
+        // 홀딩 코드가 바뀌어도 시간 배치는 같습니다(둘 다 2단계 코드와 달라 전송 시간이 같음).
+        e.start(ms(1_000), 0);
+        let trial = e.current.unwrap();
+        e.tick(trial.target);
+        assert_eq!(e.cue_stage, Some(HOLD));
+        e.abort();
+        assert_eq!(e.toggle_holding(ms(0), Language::Ko), "홀딩 끔");
+        assert_eq!(e.hold_code(), None);
+        assert_eq!(e.hold_tx, (0.0, 0.0));
+    }
+
+    #[test]
+    fn pressing_space_in_the_demo_cuts_the_hold() {
+        let mut e = TactileExperiment::default();
+        e.set_display_size(DISPLAY);
+        let since = ms(10_000);
+        e.toggle_holding(since, Language::Ko);
+        let first = e.stage_advance_ms(0);
+        let cycle = DEMO_PAUSE_MS + first + HOLD_MS;
+        let at = |offset_ms: f64| since + Duration::from_secs_f64(offset_ms / 1000.0);
+        let t = DEMO_PAUSE_MS + first;
+
+        // 쉬는 동안 누른 것은 무시합니다.
+        e.demo_press = Some(at(10.0));
+        e.tick(at(t + 50.0));
+        assert_eq!(e.cue_stage, Some(HOLD));
+
+        // 홀딩 중에 누르면 바로 꺼집니다.
+        e.demo_press = Some(at(t + 100.0));
+        e.tick(at(t + 101.0));
+        assert_eq!(e.cue_stage, None);
+
+        // 다음 주기에는 다시 홀딩합니다.
+        e.tick(at(cycle + t + 50.0));
+        assert_eq!(e.cue_stage, Some(HOLD));
     }
 
     #[test]
