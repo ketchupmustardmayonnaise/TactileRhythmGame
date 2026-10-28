@@ -49,35 +49,44 @@ impl Key {
 
 // --- 키 배치 ---------------------------------------------------------------
 
-/// 왼쪽 원 타격
+/// 왼쪽 원 타격 — 시뮬레이터 `Space`
+///
+/// `KEY_START` 와 같은 `Center` 입니다. **연주 중에만** 타격으로 쓰이고,
+/// 대기·결과 화면에서는 `KEY_START` 가 먼저 가져갑니다
+/// (`on_update` 가 연주 중일 때만 가운데 키를 타격 쪽으로 흘려보냅니다).
 const KEY_HIT_LEFT: Key = Key::new(KeyCode::Center, KeypadSide::Left);
-/// 오른쪽 원 타격
+/// 오른쪽 원 타격 — 시뮬레이터 `Enter`
 const KEY_HIT_RIGHT: Key = Key::new(KeyCode::Center, KeypadSide::Right);
-/// 모드 전환 (리듬게임 ↔ 감상) — **대기 화면에서만.**
-const KEY_MODE: Key = Key::new(KeyCode::Function, KeypadSide::Left);
 
-/// 진동 프리셋 — 누를 때마다 다음 것으로 넘어가고 끝에서 처음으로 돌아옵니다.
-/// **대기 화면에서만.**
-const KEY_PRESET_NEXT: Key = Key::new(KeyCode::Down, KeypadSide::Left);
-/// 다음 곡 — 누를 때마다 다음 곡으로 넘어가고 끝에서 처음으로 돌아옵니다.
-/// **대기 화면에서만.**
-const KEY_SONG_NEXT: Key = Key::new(KeyCode::Up, KeypadSide::Left);
+// 아래 키들은 **좌우 어느 키패드로 눌러도** 동작합니다.
+// 한 손만 쓰는 상황에서도 전부 조작할 수 있어야 하기 때문입니다.
+
+/// 연주 시작 / 결과 화면에서 대기로 돌아가기.
+const KEY_START: KeyCode = KeyCode::Center;
+/// 이전 곡 — **대기 화면에서만.**
+const KEY_SONG_PREV: KeyCode = KeyCode::Left;
+/// 다음 곡 — **대기 화면에서만.**
+const KEY_SONG_NEXT: KeyCode = KeyCode::Right;
+/// 진동 프리셋 (누를 때마다 다음 것, 끝에서 처음으로) — **대기 화면에서만.**
+///
+/// 연주 중·카운트다운에서는 연주를 멈추고 대기 화면으로 돌아갑니다.
+const KEY_PRESET: KeyCode = KeyCode::Menu;
+/// 모드 전환 (리듬게임 ↔ 감상) — **대기 화면에서만.**
+const KEY_MODE: KeyCode = KeyCode::Function;
 
 /// 타격 키와 다른 키가 겹치면 **컴파일이 실패합니다.**
 ///
 /// 겹쳐도 오류가 안 나고 조용히 한쪽이 안 먹히기 때문에, 빌드 때 잡습니다.
+/// `KEY_START` 만 예외입니다 — 연주 중에만 타격으로 흘러가므로 겹쳐도 됩니다.
 const _NO_KEY_CONFLICT: () = {
-    let hits = [KEY_HIT_LEFT, KEY_HIT_RIGHT];
-    // 타격 키는 `KEY_START` 와 같아도 됩니다. 연주 중에만 타격으로 흘러가기 때문입니다.
-    // 반면 아래 키들은 대기 화면에서 타격 키보다 **뒤에** 검사되므로, 겹치면 죽습니다.
-    let others = [KEY_MODE, KEY_PRESET_NEXT, KEY_SONG_NEXT];
+    let hits = [KEY_HIT_LEFT.code, KEY_HIT_RIGHT.code];
+    let others = [KEY_SONG_PREV, KEY_SONG_NEXT, KEY_PRESET, KEY_MODE];
     let mut i = 0;
     while i < hits.len() {
         let mut j = 0;
         while j < others.len() {
             assert!(
-                !(hits[i].code as u8 == others[j].code as u8
-                    && hits[i].side as u8 == others[j].side as u8),
+                hits[i] as u8 != others[j] as u8,
                 "타격 키가 다른 키와 겹칩니다. 겹친 키는 타격으로만 동작하고 본래 기능은 죽습니다."
             );
             j += 1;
@@ -85,12 +94,6 @@ const _NO_KEY_CONFLICT: () = {
         i += 1;
     }
 };
-
-/// 연주 시작 / 결과 화면에서 대기로 돌아가기. **양쪽 키패드의 가운데 키.**
-const KEY_START: KeyCode = KeyCode::Center;
-
-/// 연주 중단 / 애플릿 종료. 양쪽 키패드 모두 받습니다.
-const KEY_EXIT: KeyCode = KeyCode::Menu;
 
 /// 연주 시작 전 카운트다운에 읽을 문구. 한 칸씩 간격을 두고 하나씩 읽습니다.
 const COUNTDOWN: &[&str] = &["3", "2", "1"];
@@ -196,6 +199,16 @@ impl L10n {
 const TEXT_MODE_RHYTHM: L10n = L10n::new("리듬 게임 모드", "Rhythm mode", "リズムゲームモード");
 const TEXT_MODE_LISTEN: L10n = L10n::new("감상 모드", "Listening mode", "鑑賞モード");
 const TEXT_PRESET: L10n = L10n::new("진동 프리셋", "Vibration preset", "振動プリセット");
+/// 대기 화면에서 무엇을 눌러야 하는지 알려 주는 안내.
+///
+/// 화면을 볼 수 없는 사용자가 "지금 뭘 누르면 되는지" 모른 채 멈춰 있지 않도록,
+/// 곡 이름·모드·프리셋을 읽은 뒤 마지막에 붙입니다.
+const TEXT_HOW_TO_START: L10n = L10n::new(
+    "플레이를 시작하려면 가운데 키를 누르세요.",
+    "Press the center key to start playing.",
+    "プレイを始めるには中央キーを押してください。",
+);
+
 const TEXT_NO_SONG: L10n = L10n::new(
     "재생할 수 있는 곡이 없습니다.",
     "No songs available.",
@@ -1233,17 +1246,6 @@ impl Applet for TactileRhythm {
                 continue;
             }
 
-            // 나가기는 어느 화면에서든, 양쪽 키패드 모두 받습니다.
-            if event.code == KEY_EXIT {
-                self.stop_music(context);
-                if self.state == GameState::Playing || self.state == GameState::Countdown {
-                    self.state = GameState::Standby;
-                    needs_redraw = true;
-                    continue;
-                }
-                return Ok(UpdateResult::ExitApp);
-            }
-
             // 가운데 키 — 양쪽 키패드 모두 받습니다.
             //
             // 대기 화면에서는 카운트다운을 시작하고, 결과 화면에서는 대기로 돌아갑니다.
@@ -1283,6 +1285,19 @@ impl Applet for TactileRhythm {
                 continue;
             }
 
+            // 메뉴 키는 연주를 멈추고 대기 화면으로 되돌립니다.
+            // (대기 화면에서는 아래에서 프리셋 전환으로 쓰입니다. 애플릿을 끄지는 않습니다 —
+            //  종료는 런타임이 맡는 전원/ESC 키가 처리합니다.)
+            if event.code == KEY_PRESET
+                && (self.state == GameState::Playing || self.state == GameState::Countdown)
+            {
+                self.stop_music(context);
+                self.state = GameState::Standby;
+                self.play_preview(context);
+                needs_redraw = true;
+                continue;
+            }
+
             // --- 아래는 전부 대기 화면 전용입니다 -----------------------------
             //
             // 연주 중에 모드나 프리셋이 바뀌면 그 곡의 측정이 통째로 의미를 잃습니다.
@@ -1291,13 +1306,13 @@ impl Applet for TactileRhythm {
                 continue;
             }
 
-            if KEY_MODE.matches(&event) {
+            if event.code == KEY_MODE {
                 self.play_mode = self.play_mode.next();
                 let label = self.play_mode.label().get(context.language).to_string();
                 self.announce(context, label);
                 log::info!("모드 전환: {:?}", self.play_mode);
                 needs_redraw = true;
-            } else if KEY_PRESET_NEXT.matches(&event) {
+            } else if event.code == KEY_PRESET {
                 let count = self.play_mode.preset_count();
                 let idx = match self.play_mode {
                     PlayMode::Rhythm => &mut self.preset_rhythm,
@@ -1317,9 +1332,14 @@ impl Applet for TactileRhythm {
                     self.play_mode
                 );
                 needs_redraw = true;
-            } else if KEY_SONG_NEXT.matches(&event) {
+            } else if event.code == KEY_SONG_PREV || event.code == KEY_SONG_NEXT {
                 if !self.songs.is_empty() {
-                    self.selected = (self.selected + 1) % self.songs.len();
+                    let n = self.songs.len();
+                    self.selected = if event.code == KEY_SONG_NEXT {
+                        (self.selected + 1) % n
+                    } else {
+                        (self.selected + n - 1) % n
+                    };
                     if let Some(song) = self.songs.get(self.selected) {
                         let title = song.title(context.language).to_string();
                         self.announce(context, title);
@@ -1434,11 +1454,12 @@ impl Applet for TactileRhythm {
                     return SpeechResult::text(TEXT_NO_SONG.get(lang).to_string());
                 };
                 SpeechResult::text(format!(
-                    "{}. {}. {} {}.",
+                    "{}. {}. {} {}. {}",
                     song.title(lang),
                     self.play_mode.label().get(lang),
                     TEXT_PRESET.get(lang),
-                    self.preset_index() + 1
+                    self.preset_index() + 1,
+                    TEXT_HOW_TO_START.get(lang)
                 ))
             }
             // 카운트다운 중에는 숫자 읽기를 방해하지 않도록 조용히 둡니다.
@@ -1519,6 +1540,11 @@ mod tests {
         g.state = GameState::Playing;
         g.sync_locked = true;
         g
+    }
+
+    /// 좌우 어느 키패드로 눌러도 되는 키를 누릅니다.
+    fn press_code(g: &mut TactileRhythm, ctx: &mut Context, code: KeyCode, side: KeypadSide) {
+        press(g, ctx, Key::new(code, side));
     }
 
     fn press(g: &mut TactileRhythm, ctx: &mut Context, key: Key) {
@@ -1767,17 +1793,17 @@ mod tests {
         // 대기 화면에서는 바뀝니다.
         let mut g = game();
         assert_eq!(g.state, GameState::Standby);
-        press(&mut g, &mut ctx, KEY_MODE);
+        press_code(&mut g, &mut ctx, KEY_MODE, KeypadSide::Left);
         assert_eq!(g.play_mode, PlayMode::Listen, "대기 화면에서는 모드가 바뀌어야 합니다");
-        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        press_code(&mut g, &mut ctx, KEY_PRESET, KeypadSide::Left);
         assert_eq!(g.preset_listen, 1);
 
         // 연주 중에는 안 바뀝니다.
         let mut g = playing();
         let (mode, preset) = (g.play_mode, g.preset_rhythm);
-        press(&mut g, &mut ctx, KEY_MODE);
-        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
-        press(&mut g, &mut ctx, KEY_SONG_NEXT);
+        press_code(&mut g, &mut ctx, KEY_MODE, KeypadSide::Left);
+        press_code(&mut g, &mut ctx, KEY_PRESET, KeypadSide::Left);
+        press_code(&mut g, &mut ctx, KEY_SONG_NEXT, KeypadSide::Left);
         assert_eq!(g.play_mode, mode, "연주 중에 모드가 바뀌었습니다");
         assert_eq!(g.preset_rhythm, preset, "연주 중에 프리셋이 바뀌었습니다");
     }
@@ -1789,20 +1815,20 @@ mod tests {
         let mut g = game();
 
         for expected in 1..RHYTHM_PRESETS.len() {
-            press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+            press_code(&mut g, &mut ctx, KEY_PRESET, KeypadSide::Left);
             assert_eq!(g.preset_rhythm, expected);
         }
-        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        press_code(&mut g, &mut ctx, KEY_PRESET, KeypadSide::Left);
         assert_eq!(g.preset_rhythm, 0, "끝에서 처음으로 돌아와야 합니다");
 
         // 감상 모드로 가도 리듬 프리셋은 그대로 남아 있어야 합니다.
-        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
+        press_code(&mut g, &mut ctx, KEY_PRESET, KeypadSide::Left);
         let kept = g.preset_rhythm;
         assert_eq!(kept, 1);
-        press(&mut g, &mut ctx, KEY_MODE);
+        press_code(&mut g, &mut ctx, KEY_MODE, KeypadSide::Left);
         assert_eq!(g.play_mode, PlayMode::Listen);
-        press(&mut g, &mut ctx, KEY_PRESET_NEXT);
-        press(&mut g, &mut ctx, KEY_MODE);
+        press_code(&mut g, &mut ctx, KEY_PRESET, KeypadSide::Left);
+        press_code(&mut g, &mut ctx, KEY_MODE, KeypadSide::Left);
         assert_eq!(g.play_mode, PlayMode::Rhythm);
         assert_eq!(g.preset_rhythm, kept, "모드를 오가면 프리셋이 유지되어야 합니다");
     }
@@ -1966,21 +1992,19 @@ mod tests {
         let mut ctx = Context::new();
 
         // 곡 변경 키를 눌러도 연주가 시작되면 안 됩니다.
-        for key in [KEY_SONG_NEXT, KEY_PRESET_NEXT] {
+        for code in [KEY_SONG_NEXT, KEY_PRESET] {
             let mut g = game();
-            press(&mut g, &mut ctx, key);
+            press_code(&mut g, &mut ctx, code, KeypadSide::Left);
             assert_eq!(
                 g.state,
                 GameState::Standby,
-                "{:?}/{:?} 가 타격 키에 가려져 연주가 시작됐습니다",
-                key.code,
-                key.side
+                "{code:?} 가 타격 키에 가려져 연주가 시작됐습니다"
             );
         }
 
         // 모드·프리셋 키도 마찬가지입니다.
         let mut g = game();
-        press(&mut g, &mut ctx, KEY_MODE);
+        press_code(&mut g, &mut ctx, KEY_MODE, KeypadSide::Left);
         assert_eq!(g.state, GameState::Standby);
         assert_eq!(g.play_mode, PlayMode::Listen, "모드 키가 먹히지 않았습니다");
     }
@@ -2043,13 +2067,95 @@ mod tests {
         let mut ctx = Context::new();
         let mut g = game();
         let before = g.selected;
-        press(&mut g, &mut ctx, KEY_SONG_NEXT);
+        press_code(&mut g, &mut ctx, KEY_SONG_NEXT, KeypadSide::Left);
         assert_ne!(g.selected, before, "곡이 안 넘어갔습니다");
 
         // 곡 목록이 비어 있어도 조용히 넘어가야 합니다.
         let mut empty = TactileRhythm::default();
         empty.play_preview(&mut ctx);
         assert!(empty.preview_request.is_none());
+    }
+
+    /// 대기 화면 안내에 **어떻게 시작하는지**가 들어 있어야 합니다.
+    ///
+    /// 화면을 볼 수 없는 사용자가 뭘 눌러야 할지 모른 채 멈춰 있으면 안 됩니다.
+    #[test]
+    fn standby_tells_you_how_to_start() {
+        let ctx = Context::new();
+        let mut g = game();
+        g.state = GameState::Standby;
+
+        let SpeechResult::Text { text, .. } = g.on_speech(&ctx) else {
+            panic!("대기 화면에서 아무 말도 하지 않습니다");
+        };
+
+        let song = g.song().unwrap().title(ctx.language);
+        assert!(text.contains(song), "곡 이름이 빠졌습니다: {text}");
+        assert!(
+            text.contains(TEXT_HOW_TO_START.get(ctx.language)),
+            "시작 방법 안내가 빠졌습니다: {text}"
+        );
+    }
+
+    /// 대기 화면의 조작은 **양쪽 키패드 모두** 먹어야 합니다.
+    /// 한 손만 쓰는 상황에서도 전부 조작할 수 있어야 하기 때문입니다.
+    #[test]
+    fn standby_controls_work_from_either_keypad() {
+        for side in [KeypadSide::Left, KeypadSide::Right] {
+            let mut ctx = Context::new();
+
+            // 모드 전환
+            let mut g = game();
+            press_code(&mut g, &mut ctx, KEY_MODE, side);
+            assert_eq!(g.play_mode, PlayMode::Listen, "{side:?} 모드 전환 실패");
+
+            // 프리셋
+            let mut g = game();
+            press_code(&mut g, &mut ctx, KEY_PRESET, side);
+            assert_eq!(g.preset_rhythm, 1, "{side:?} 프리셋 전환 실패");
+
+            // 다음 곡 / 이전 곡
+            let mut g = game();
+            let n = g.songs.len();
+            press_code(&mut g, &mut ctx, KEY_SONG_NEXT, side);
+            assert_eq!(g.selected, 1 % n, "{side:?} 다음 곡 실패");
+            press_code(&mut g, &mut ctx, KEY_SONG_PREV, side);
+            assert_eq!(g.selected, 0, "{side:?} 이전 곡 실패");
+
+            // 시작
+            let mut g = game();
+            press_code(&mut g, &mut ctx, KEY_START, side);
+            assert_eq!(g.state, GameState::Countdown, "{side:?} 시작 실패");
+        }
+    }
+
+    /// 메뉴 키는 **애플릿을 끄지 않습니다.** 종료는 런타임의 전원/ESC 키가 맡습니다.
+    ///
+    /// 연주 중에는 연주를 멈추고 대기로, 대기 화면에서는 프리셋 전환입니다.
+    #[test]
+    fn the_menu_key_never_exits_the_applet() {
+        for side in [KeypadSide::Left, KeypadSide::Right] {
+            let mut ctx = Context::new();
+
+            // 대기 화면: 프리셋만 바뀌고 화면은 그대로
+            let mut g = game();
+            press_code(&mut g, &mut ctx, KEY_PRESET, side);
+            assert_eq!(g.state, GameState::Standby);
+            assert_eq!(g.preset_rhythm, 1);
+
+            // 연주 중: 대기로 되돌아가고, 프리셋은 건드리지 않습니다
+            let mut g = playing();
+            let preset = g.preset_rhythm;
+            press_code(&mut g, &mut ctx, KEY_PRESET, side);
+            assert_eq!(g.state, GameState::Standby, "{side:?} 연주 중단 실패");
+            assert_eq!(g.preset_rhythm, preset, "연주를 멈추면서 프리셋까지 바꿨습니다");
+
+            // 결과 화면: 애플릿이 꺼지면 안 됩니다
+            let mut g = game();
+            g.state = GameState::Result;
+            press_code(&mut g, &mut ctx, KEY_PRESET, side);
+            assert_ne!(g.state, GameState::Playing);
+        }
     }
 
     // --- 화면 ---------------------------------------------------------------
